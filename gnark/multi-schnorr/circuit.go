@@ -23,7 +23,7 @@ type SchnorrSignature struct {
 type Candidate struct {
 	Ax, Ay   frontend.Variable // Public key A coordinates
 	Sig      SchnorrSignature
-	isIgnore frontend.Variable // 1 if this candidate is to be ignored, 0 otherwise
+	IsIgnore frontend.Variable // 1 if this candidate is to be ignored, 0 otherwise
 }
 
 type Circuit struct {
@@ -77,7 +77,7 @@ func (c *Circuit) Define(api frontend.API) error {
 	computedRoot := currentLevel[0]
 	api.AssertIsEqual(computedRoot, c.Root)
 
-	sumValid := api.Constant(0)
+	var sumValid frontend.Variable = 0
 
 	// per-candidate checks
 	for i := 0; i < MaxK; i++ {
@@ -87,8 +87,8 @@ func (c *Circuit) Define(api frontend.API) error {
 		R := twistededwards.Point{X: wi.Sig.Rx, Y: wi.Sig.Ry}
 
 		// Safety: on-curve + subgroup (cofactor) checks
-		api.AssertIsBoolean(wi.isIgnore)
-		active := api.Sub(1, wi.isIgnore)
+		api.AssertIsBoolean(wi.IsIgnore)
+		active := api.Sub(1, wi.IsIgnore)
 
 		// gated on-curve checks (A and R): a*x^2 + y^2 = 1 + d*x^2*y^2
 		// A on-curve
@@ -127,7 +127,7 @@ func (c *Circuit) Define(api frontend.API) error {
 		candidateLeaf := h.Sum()
 
 		// For each active signature, check membership by finding matching leaf
-		merkleMatches := api.Constant(0) // Will be 1 if pubkey found in tree
+		var merkleMatches frontend.Variable = 0 // Will be 1 if pubkey found in tree
 
 		// Check if this leaf appears anywhere in our tree
 		// (This is the membership test - pubkey must be in validator set)
@@ -148,11 +148,11 @@ func (c *Circuit) Define(api frontend.API) error {
 		// check: [S]G == R + [e]A
 		sG := E.ScalarMul(G, wi.Sig.S)
 		eA := E.ScalarMul(A, e)
-		rhs := E.Add(R, eA)
-		api.AssertIsEqual(api.Mul(active, api.Sub(sG.X, rhs.X)), 0)
-		api.AssertIsEqual(api.Mul(active, api.Sub(sG.Y, rhs.Y)), 0)
-		okX := api.IsZero(api.Sub(sG.X, rhs.X))
-		okY := api.IsZero(api.Sub(sG.Y, rhs.Y))
+		rhsP := E.Add(R, eA)
+		api.AssertIsEqual(api.Mul(active, api.Sub(sG.X, rhsP.X)), 0)
+		api.AssertIsEqual(api.Mul(active, api.Sub(sG.Y, rhsP.Y)), 0)
+		okX := api.IsZero(api.Sub(sG.X, rhsP.X))
+		okY := api.IsZero(api.Sub(sG.Y, rhsP.Y))
 
 		// valid_i = active ∧ merkleOK ∧ okX ∧ okY  (AND via multiplication)
 		valid := api.Mul(active, merkleOK)
