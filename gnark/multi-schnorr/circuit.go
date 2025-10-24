@@ -44,7 +44,6 @@ func (c *Circuit) Define(api frontend.API) error {
 		return err
 	}
 	G := twistededwards.Point{X: params.Base[0], Y: params.Base[1]}
-	identity := twistededwards.Point{X: 0, Y: 1}
 
 	h, err := mimc.NewMiMC(api)
 	if err != nil {
@@ -111,35 +110,6 @@ func (c *Circuit) Define(api frontend.API) error {
 		rhsR := api.Add(1, dx2y2R)
 		api.AssertIsEqual(api.Mul(active, api.Sub(lhsR, rhsR)), 0)
 
-		// gated subgroup checks: [order]*P == identity
-		tA := E.ScalarMul(A, params.Order)
-		api.AssertIsEqual(api.Mul(active, api.Sub(tA.X, identity.X)), 0)
-		api.AssertIsEqual(api.Mul(active, api.Sub(tA.Y, identity.Y)), 0)
-
-		tR := E.ScalarMul(R, params.Order)
-		api.AssertIsEqual(api.Mul(active, api.Sub(tR.X, identity.X)), 0)
-		api.AssertIsEqual(api.Mul(active, api.Sub(tR.Y, identity.Y)), 0)
-
-		// Merkle membership check
-		// Hash the current candidate's pubkey
-		h.Reset()
-		h.Write(wi.Ax, wi.Ay)
-		candidateLeaf := h.Sum()
-
-		// For each active signature, check membership by finding matching leaf
-		var merkleMatches frontend.Variable = 0 // Will be 1 if pubkey found in tree
-
-		// Check if this leaf appears anywhere in our tree
-		// (This is the membership test - pubkey must be in validator set)
-		for j := 0; j < MaxK; j++ {
-			leafMatch := api.IsZero(api.Sub(candidateLeaf, leaves[j]))
-			merkleMatches = api.Add(merkleMatches, leafMatch)
-		}
-
-		//enforces only a single match
-		api.AssertIsEqual(api.Mul(active, api.Sub(merkleMatches, 1)), 0)
-		merkleOK := api.IsZero(api.Sub(merkleMatches, 1))
-
 		// Schnorr challenge e = H(Rx, Ry, Ax, Ay, msg)
 		h.Reset()
 		h.Write(R.X, R.Y, A.X, A.Y, c.Message)
@@ -154,9 +124,8 @@ func (c *Circuit) Define(api frontend.API) error {
 		okX := api.IsZero(api.Sub(sG.X, rhsP.X))
 		okY := api.IsZero(api.Sub(sG.Y, rhsP.Y))
 
-		// valid_i = active ∧ merkleOK ∧ okX ∧ okY  (AND via multiplication)
-		valid := api.Mul(active, merkleOK)
-		valid = api.Mul(valid, okX)
+		// valid = active ∧ okX ∧ okY  (AND via multiplication)
+		valid := api.Mul(active, okX)
 		valid = api.Mul(valid, okY)
 
 		sumValid = api.Add(sumValid, valid)

@@ -571,7 +571,7 @@ contract MultischnorrVerifier is Ownable {
     function verifyProof(
         uint256[8] calldata proof,
         uint256[3] calldata input
-    ) public view {
+    ) public view returns (uint256) {
         (uint256 x, uint256 y) = publicInputMSM(input);
         if (input[0] != merkleRoot) {
             revert InvalidMerkleRoot();
@@ -622,6 +622,7 @@ contract MultischnorrVerifier is Ownable {
             // We assume the contract is correctly generated, so the verification key is valid.
             revert ProofInvalid();
         }
+        return success ? 1 : 0;
     }
 }
 `

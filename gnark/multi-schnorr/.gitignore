@@ -1,3 +1,5 @@
 *.pk
 *.vk
 *.json
+*.r1cs
+*.pprof

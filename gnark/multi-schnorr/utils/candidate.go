@@ -98,7 +98,7 @@ func addAffine(P, Q tebn254.PointAffine) tebn254.PointAffine {
 	return R
 }
 
-func zeroSig() SchnorrSignature { return SchnorrSignature{big.NewInt(0), big.NewInt(0), big.NewInt(0)} }
+func zeroSig() SchnorrSignature { return SchnorrSignature{big.NewInt(0), big.NewInt(1), big.NewInt(1)} }
 
 // assumes KeyPairs are padded already (MaxK length, with zeroed keys at the end)
 func BuildCandidates(
@@ -136,7 +136,7 @@ func BuildCandidates(
 		}
 
 		if _, want := signerSet[i]; want {
-			if keys[i].Priv.Sk == big.NewInt(0) {
+			if keys[i].Priv.Sk.Cmp(big.NewInt(0)) == 0 {
 				return nil, 0, fmt.Errorf("index %d marked as signer but has nil/zero SK", i)
 			}
 			sig, err := Sign(keys[i].Priv.Sk, keys[i].Pub, msg, rng, nonce)

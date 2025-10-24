@@ -73,7 +73,7 @@ func randScalar(order *big.Int) (*big.Int, error) {
 	return k, nil
 }
 
-// Ax=0, Ay=0
+// Ax=0, Ay=1 is the identity point in BabyJubJub
 // so that the circuit’s leaf H(Ax,Ay) matches the padded leaf
 func GeneratePaddedKeyPairs(n, maxK int) ([]KeyPair, error) {
 	if n < 0 {
@@ -96,7 +96,7 @@ func GeneratePaddedKeyPairs(n, maxK int) ([]KeyPair, error) {
 	for len(out) < maxK {
 		out = append(out, KeyPair{
 			Priv: PrivKey{Sk: big.NewInt(0)},
-			Pub:  PubKey{Ax: big.NewInt(0), Ay: big.NewInt(0)},
+			Pub:  PubKey{Ax: big.NewInt(0), Ay: big.NewInt(1)},
 		})
 	}
 	return out, nil

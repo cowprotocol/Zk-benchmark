@@ -36,7 +36,7 @@ func BuildRoot(keys []KeyPair) (root fr.Element, leaves []fr.Element, err error)
 		cur = next
 	}
 
-	fmt.Printf("%v\n", cur[0])
+	fmt.Printf("merkle root: %v\n", cur[0])
 	return cur[0], leaves, nil
 }
 

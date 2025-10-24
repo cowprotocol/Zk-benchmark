@@ -9,11 +9,12 @@ Usage:
     --private-key 0xYOUR_DEPLOYER_PK \
     --rpc-url https://sepolia.rpc.url \
     --threshold <uint256> \
-    --merkle-root <uint256-or-0xhex>
+    --merkle-root <uint256-or-0xhex> \
+    --etherscan-api-key ETHERSCAN_API_KEY
 EOF
 }
 
-PK="" RPC_URL="" THRESHOLD="" MERKLE_ROOT=""
+PK="" RPC_URL="" THRESHOLD="" MERKLE_ROOT="" ETHERSCAN_API_KEY=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -21,12 +22,13 @@ while [[ $# -gt 0 ]]; do
     --rpc-url)       RPC_URL="$2"; shift 2 ;;
     --threshold)     THRESHOLD="$2"; shift 2 ;;
     --merkle-root)   MERKLE_ROOT="$2"; shift 2 ;;
+    --etherscan-api-key) ETHERSCAN_API_KEY="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
 
-[[ -n "$PK" && -n "$RPC_URL" && -n "$THRESHOLD" && -n "$MERKLE_ROOT" ]] || {
-  echo "Usage: $0 --private-key <0xPK> --rpc-url <URL> --threshold <uint> --merkle-root <uint|0xhex>"
+[[ -n "$PK" && -n "$RPC_URL" && -n "$THRESHOLD" && -n "$MERKLE_ROOT" && -n "$ETHERSCAN_API_KEY" ]] || {
+  echo "Usage: $0 --private-key <0xPK> --rpc-url <URL> --threshold <uint> --merkle-root <uint|0xhex> --etherscan-api-key <KEY>"
   exit 1
 }
 
@@ -51,6 +53,8 @@ pushd "$CONTRACT_DIR" >/dev/null
       --private-key "$PK" \
       --broadcast \
       --sig "run(uint256,uint256)" "$THRESHOLD" "$MERKLE_ROOT" \
+      --etherscan-api-key "$ETHERSCAN_API_KEY" \
+      --verify \
       -vvvv
 
 popd >/dev/null
