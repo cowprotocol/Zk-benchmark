@@ -49,14 +49,12 @@ func frFromStringMiMC(s string) fr.Element {
 func GenerateProof(
 	csPath string,
 	pkPath string,
-	numValidators int,
 	maxK int,
 	signerIndices []int,
 	msgToHash string,
 ) (groth16.Proof, witness.Witness, PublicInputs, error) {
 
 	wd, err := utils.PrepareWitnessData(
-		numValidators,
 		maxK,
 		signerIndices,
 		frFromStringMiMC(msgToHash),
@@ -206,31 +204,61 @@ func main() {
 	const (
 		csPath = "../circuit.r1cs"
 		pkPath = "../setup/multischnorr.g16.pk"
-
-		numValidators = 50
-		maxK          = 64
 	)
 
-	msgToHash := "Hello world"
-
-	signerIndices := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-		21, 22, 23, 24, 25, 26, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
-		40, 41, 42, 43, 44, 45, 47, 48}
-
-	fmt.Println("Generating proof...")
-	proof, _, pubs, err := GenerateProof(
-		csPath,
-		pkPath,
-		numValidators,
-		maxK,
-		signerIndices,
-		msgToHash,
-	)
-	_, err = convertProofToSolidityOutput(
-		proof,
-		pubs.Root, pubs.Message, pubs.SumValid,
-	)
-	if err != nil {
-		log.Fatalf("Failed to convert proof to Solidity output: %v", err)
+	if len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "Usage: go run . <message> <maxK> <signer_indices...>\n")
+		fmt.Fprintf(os.Stderr, "Example: go run . 'Hello world' 64 0 1 2 3 4 5 6 7 8 9\n")
+		os.Exit(1)
 	}
+
+	msgToHash := os.Args[1]
+	maxK := atoiOrExit(os.Args[2], "maxK")
+
+	signerIndices := make([]int, 0, len(os.Args)-3)
+	for _, arg := range os.Args[3:] {
+		signerIndices = append(signerIndices, atoiOrExit(arg, "signer index"))
+	}
+
+	fmt.Printf("Generating proof with msg=%q, maxK=%d, signers=%v\n",
+		msgToHash, maxK, signerIndices)
+
+	proof, _, pubs, err := GenerateProof(csPath, pkPath, maxK, signerIndices, msgToHash)
+	if err != nil {
+		log.Fatalf("GenerateProof failed: %v", err)
+	}
+
+	solOut, err := convertProofToSolidityOutput(proof, pubs.Root, pubs.Message, pubs.SumValid)
+	if err != nil {
+		log.Fatalf("convertProofToSolidityOutput failed: %v", err)
+	}
+	writeProofJSON(solOut)
+}
+
+func atoiOrExit(s string, name string) int {
+	val, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Invalid %s: %q\n", name, s)
+		os.Exit(1)
+	}
+	return int(val.Int64())
+}
+
+func writeProofJSON(out SolidityOutput) {
+	data := fmt.Sprintf(`{
+  	"proof": [%s,%s,%s,%s,%s,%s,%s,%s],
+  	"input": [%s,%s,%s]
+	}`,
+		out.A[0], out.A[1],
+		out.B[0][0], out.B[0][1],
+		out.B[1][0], out.B[1][1],
+		out.C[0], out.C[1],
+		out.Inputs[0], out.Inputs[1], out.Inputs[2],
+	)
+
+	outPath := utils.RepoPath("../proof.json")
+	if err := os.WriteFile(outPath, []byte(data), 0644); err != nil {
+		log.Fatalf("failed to write %s: %v", outPath, err)
+	}
+	fmt.Println("Proof exported to", outPath)
 }

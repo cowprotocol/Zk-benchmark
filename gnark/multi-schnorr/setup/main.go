@@ -30,19 +30,34 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("compile: %w", err)
 	}
+	fmt.Println("Compiled OK")
+	fmt.Printf("Constraints: %d\n", cs.GetNbConstraints())
+	internal, secret, public := cs.GetNbVariables()
+	fmt.Printf("Variables  : total=%d (internal=%d, secret=%d, public=%d)\n",
+		internal+secret+public, internal, secret, public)
+	fmt.Println("Writing circuit.r1cs...")
+	r1cspath := repoPath("../circuit.r1cs")
+	if err := writetoPath(r1cspath, func(f *os.File) error {
+		_, err := cs.WriteTo(f)
+		return err
+	}); err != nil {
+		return fmt.Errorf("write r1cs: %w", err)
+	}
 
+	fmt.Println("Running setup...")
+	fmt.Println("writing proving and verification keys...")
 	pk, vk, err := groth16.Setup(cs)
 	if err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 
-	if err := writeKey("multischnorr.g16.vk", func(f *os.File) error {
+	if err := writetoPath("multischnorr.g16.vk", func(f *os.File) error {
 		_, err := vk.WriteRawTo(f)
 		return err
 	}); err != nil {
 		return err
 	}
-	if err := writeKey("multischnorr.g16.pk", func(f *os.File) error {
+	if err := writetoPath("multischnorr.g16.pk", func(f *os.File) error {
 		_, err := pk.WriteRawTo(f)
 		return err
 	}); err != nil {
@@ -73,6 +88,7 @@ func run() error {
 	sol := strings.Replace(multischnorrTemplate, "/*{{CONSTANTS}}*/", constantsBlock, 1)
 
 	// Write to contract/src/MultischnorrVerifier.sol
+	fmt.Println("writing MultischnorrVerifier contract...")
 	outDir := repoPath("../contract/src/")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -92,9 +108,10 @@ func run() error {
 }
 
 // writeKey writes a key file, ensuring it does not already exist
-func writeKey(path string, write func(*os.File) error) error {
+func writetoPath(path string, write func(*os.File) error) error {
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("file already exists: %s", path)
+		fmt.Printf("file already exists: %s", path)
+		return nil
 	}
 	f, err := os.Create(path)
 	if err != nil {
@@ -166,7 +183,6 @@ func extractUint256Constants(sol string) (string, error) {
 }
 
 func repoPath(rel string) string {
-	// Resolve relative to this source file (inside setup/)
 	_, thisFile, _, _ := runtime.Caller(0)
 	base := filepath.Dir(thisFile)
 	return filepath.Clean(filepath.Join(base, rel))

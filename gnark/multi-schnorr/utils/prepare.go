@@ -6,6 +6,8 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 )
@@ -27,7 +29,7 @@ type SerializableKeys struct {
 	Keys []SerializableKeyPair `json:"keys"`
 }
 
-const keyPath = "keys.json"
+var keyPath = RepoPath("../keys.json")
 
 func toSerializable(keys []KeyPair) SerializableKeys {
 	sk := SerializableKeys{
@@ -67,7 +69,7 @@ func fromSerializable(sk SerializableKeys) ([]KeyPair, error) {
 	return keys, nil
 }
 
-func saveKeysToFile(keys []KeyPair) error {
+func SaveKeysToFile(keys []KeyPair) error {
 	sk := toSerializable(keys)
 	data, err := json.MarshalIndent(sk, "", "  ")
 	if err != nil {
@@ -83,7 +85,7 @@ func saveKeysToFile(keys []KeyPair) error {
 	return nil
 }
 
-func loadKeysFromFile() ([]KeyPair, error) {
+func LoadKeysFromFile() ([]KeyPair, error) {
 	data, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -105,18 +107,17 @@ func loadKeysFromFile() ([]KeyPair, error) {
 }
 
 func PrepareWitnessData(
-	numValidators int,
 	maxK int,
 	signerIndices []int,
 	message fr.Element,
 	rng io.Reader,
 	nonce *big.Int,
 ) (*WitnessData, error) {
-	if numValidators > maxK {
-		return nil, fmt.Errorf("numValidators (%d) > maxK (%d)", numValidators, maxK)
+	if len(signerIndices) > maxK {
+		return nil, fmt.Errorf("signerindices (%d) > maxK (%d)", len(signerIndices), maxK)
 	}
-	if numValidators < 0 {
-		return nil, fmt.Errorf("numValidators must be >= 0")
+	if len(signerIndices) < 0 {
+		return nil, fmt.Errorf("signerindices must be >= 0")
 	}
 
 	var keys []KeyPair
@@ -124,23 +125,18 @@ func PrepareWitnessData(
 
 	if _, err := os.Stat(keyPath); err == nil {
 		fmt.Println("Key file found, loading keys...")
-		keys, err = loadKeysFromFile()
+		keys, err = LoadKeysFromFile()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keys: %w", err)
 		}
-
 		if len(keys) != maxK {
-			return nil, fmt.Errorf("loaded keys size (%d) doesn't match maxK (%d)", len(keys), maxK)
+			return nil, fmt.Errorf("keys.json has %d keys, expected maxK=%d; regenerate keys.json", len(keys), maxK)
 		}
-	} else if os.IsNotExist(err) {
-		keys, err = GeneratePaddedKeyPairs(numValidators, maxK)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate keys: %w", err)
+	} else {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("keys.json not found at %s; run keygen first", keyPath)
 		}
-		err = saveKeysToFile(keys)
-		if err != nil {
-			return nil, fmt.Errorf("failed to save keys: %w", err)
-		}
+		return nil, fmt.Errorf("stat %s: %w", keyPath, err)
 	}
 
 	fmt.Println("Building Merkle root...")
@@ -164,4 +160,10 @@ func PrepareWitnessData(
 
 	fmt.Printf("Witness data prepared: root=%s, sumValid=%d\n", root.String(), sumValid)
 	return witnessData, nil
+}
+
+func RepoPath(rel string) string {
+	_, thisFile, _, _ := runtime.Caller(0)
+	base := filepath.Dir(thisFile)
+	return filepath.Clean(filepath.Join(base, rel))
 }

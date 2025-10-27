@@ -5,11 +5,11 @@ usage() {
   cat <<'EOF'
 Setup and Deploy MultischnorrVerifier to Sepolia via Foundry
 Usage:
-  ./setup_and_deploy_sepolia.sh \
+  bash ./setup_and_deploy_sepolia.sh \
     --private-key 0xYOUR_DEPLOYER_PK \
     --rpc-url https://sepolia.rpc.url \
     --threshold <uint256> \
-    --merkle-root <uint256-or-0xhex> \
+    [--merkle-root <uint256-or-0xhex>] \
     --etherscan-api-key ETHERSCAN_API_KEY
 EOF
 }
@@ -27,22 +27,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$PK" && -n "$RPC_URL" && -n "$THRESHOLD" && -n "$MERKLE_ROOT" && -n "$ETHERSCAN_API_KEY" ]] || {
-  echo "Usage: $0 --private-key <0xPK> --rpc-url <URL> --threshold <uint> --merkle-root <uint|0xhex> --etherscan-api-key <KEY>"
+[[ -n "$PK" && -n "$RPC_URL" && -n "$THRESHOLD" && -n "$ETHERSCAN_API_KEY" ]] || {
+  echo "Usage: $0 --private-key <0xPK> --rpc-url <URL> --threshold <uint> [--merkle-root <uint|0xhex>] --etherscan-api-key <KEY>"
   exit 1
 }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_DIR="$ROOT/setup"
 CONTRACT_DIR="$ROOT/contract"
+MERKLE_FILE="$ROOT/merkle_root.txt"
 
-# 1) Setup
+if [[ -z "$MERKLE_ROOT" ]]; then
+  if [[ -f "$MERKLE_FILE" ]]; then
+    MERKLE_ROOT="$(tr -d '[:space:]' < "$MERKLE_FILE")"
+    echo ">> Using Merkle root from merkle_root.txt: $MERKLE_ROOT"
+  else
+    echo "Error: --merkle-root not provided and $MERKLE_FILE not found."
+    echo "Provide --merkle-root <uint|0xhex> or create merkle_root.txt."
+    exit 1
+  fi
+fi
+
 echo ">> Running Go setup..."
 pushd "$SETUP_DIR" >/dev/null
   go run .
 popd >/dev/null
 
-# 2) Build + 3) Deploy
 pushd "$CONTRACT_DIR" >/dev/null
   echo ">> forge build"
   forge build
