@@ -3,3 +3,4 @@ cache/
 out/
 lib/
 build/
+src/Verifier.sol

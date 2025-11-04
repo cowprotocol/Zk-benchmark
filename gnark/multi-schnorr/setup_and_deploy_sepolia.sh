@@ -43,7 +43,7 @@ if [[ -z "$MERKLE_ROOT" ]]; then
     echo ">> Using Merkle root from merkle_root.txt: $MERKLE_ROOT"
   else
     echo "Error: --merkle-root not provided and $MERKLE_FILE not found."
-    echo "Provide --merkle-root <uint|0xhex> or create merkle_root.txt."
+    echo "Provide --merkle-root <uint|0xhex> or run Keygen."
     exit 1
   fi
 fi
@@ -54,6 +54,9 @@ pushd "$SETUP_DIR" >/dev/null
 popd >/dev/null
 
 pushd "$CONTRACT_DIR" >/dev/null
+  if [ ! -d "lib/openzeppelin-contracts" ]; then
+    forge install OpenZeppelin/openzeppelin-contracts@v5.4.0 --no-commit
+  fi
   echo ">> forge build"
   forge build
 
