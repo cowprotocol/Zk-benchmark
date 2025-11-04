@@ -2,11 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import {MiMCBn254} from "./library/MiMCHash.sol";
 import {Verifier} from "./Verifier.sol";
 
 contract MultiSchnorrVerifier is Ownable {
-    using MiMCBn254 for bytes;
     Verifier public verifier;
     uint256 public threshold;
     uint256 public merkleRoot;
@@ -40,6 +38,9 @@ contract MultiSchnorrVerifier is Ownable {
         merkleRoot = _root;
     }
 
+    uint256 constant R =
+        0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001;
+
     function updateVerifier(Verifier newVerifier) external onlyOwner {
         require(address(newVerifier) != address(0), "verifier=0");
         address old = address(verifier);
@@ -61,6 +62,10 @@ contract MultiSchnorrVerifier is Ownable {
         emit MerkleRootUpdated(old, r);
     }
 
+    function keccakToFr(bytes memory m) internal pure returns (uint256) {
+        return uint256(keccak256(m)) % R;
+    }
+
     /// @notice Verify proof binds {merkleRoot, hashToFr(message), sumValid}
     /// and emits the original message.
     function verify(
@@ -75,7 +80,7 @@ contract MultiSchnorrVerifier is Ownable {
         if (_merkleRoot != merkleRoot) {
             revert InvalidMerkleRoot();
         }
-        uint256 messageFr = MiMCBn254.hashToFr(message);
+        uint256 messageFr = keccakToFr(message);
         uint256[3] memory input = [merkleRoot, messageFr, sumValid];
 
         verifier.verifyProof(proof, input);
