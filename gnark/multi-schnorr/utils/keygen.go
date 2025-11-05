@@ -75,15 +75,16 @@ func randScalar(order *big.Int) (*big.Int, error) {
 
 // Ax=0, Ay=1 is the identity point in BabyJubJub
 // so that the circuit’s leaf H(Ax,Ay) matches the padded leaf
-func GeneratePaddedKeyPairs(n, maxK int) ([]KeyPair, error) {
+func GeneratePaddedKeyPairs(n, depth int) ([]KeyPair, error) {
+	maxK := 1 << depth
 	if n < 0 {
 		return nil, fmt.Errorf("n must be >= 0")
 	}
-	if maxK <= 0 || (maxK&(maxK-1)) != 0 {
-		return nil, fmt.Errorf("maxK must be a power of two")
+	if depth <= 0 {
+		return nil, fmt.Errorf("depth must be > 0")
 	}
 	if n > maxK {
-		return nil, fmt.Errorf("n (%d) > maxK (%d)", n, maxK)
+		return nil, fmt.Errorf("n (%d) > maxK (%d), cannot have more keys than maxK", n, maxK)
 	}
 
 	kps, err := GenerateKeyPairs(n)

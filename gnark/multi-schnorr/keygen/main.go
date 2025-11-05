@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"strconv"
 
+	multischnorr "github.com/cowprotocol/Zk-benchmark/gnark/multi-schnorr"
 	"github.com/cowprotocol/Zk-benchmark/gnark/multi-schnorr/utils"
 )
 
@@ -14,22 +14,16 @@ func toHex32(x *big.Int) string {
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Println("Usage: go run ./keygen/main.go <numValidators> <maxK>")
-		os.Exit(1)
-	}
+	// read depth from circuit.go
+	depth := multischnorr.Depth
 
-	numValidators, err := strconv.Atoi(os.Args[1])
-	if err != nil {
-		panic(fmt.Errorf("invalid numValidators: %w", err))
-	}
-
-	maxK, err := strconv.Atoi(os.Args[2])
-	if err != nil {
-		panic(fmt.Errorf("invalid maxK: %w", err))
-	}
+	// used for simplicity in testing
+	// depth of merkle tree is fixed to 6 in circuit
+	// if needed, can be modified to take depth and numValidators as input
+	numValidators := 1 << depth
 
 	var keys []utils.KeyPair
+	var err error
 
 	if _, err = os.Stat("keys.json"); err == nil {
 		keys, err = utils.LoadKeysFromFile()
@@ -38,7 +32,7 @@ func main() {
 		}
 		fmt.Println("Loaded existing keys.json")
 	} else {
-		keys, err = utils.GeneratePaddedKeyPairs(numValidators, maxK)
+		keys, err = utils.GeneratePaddedKeyPairs(numValidators, depth)
 		if err != nil {
 			panic(fmt.Errorf("failed to generate keys: %w", err))
 		}
@@ -46,6 +40,10 @@ func main() {
 			panic(fmt.Errorf("failed to save keys: %w", err))
 		}
 		fmt.Println("Generated and saved new keys.json")
+	}
+
+	if len(keys) != (1 << depth) {
+		panic(fmt.Errorf("len(keys) must be %d, got %d", 1<<depth, len(keys)))
 	}
 
 	root, _, err := utils.BuildRoot(keys)

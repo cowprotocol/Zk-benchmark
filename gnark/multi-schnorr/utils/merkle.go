@@ -12,9 +12,6 @@ func BuildRoot(keys []KeyPair) (root fr.Element, leaves []fr.Element, err error)
 	if len(keys) == 0 {
 		return fr.Element{}, nil, errors.New("no keys provided")
 	}
-	if (len(keys) & (len(keys) - 1)) != 0 {
-		return fr.Element{}, nil, fmt.Errorf("len(keys) must be a power of two, got %d", len(keys))
-	}
 
 	leaves = make([]fr.Element, 0, len(keys))
 	for _, k := range keys {

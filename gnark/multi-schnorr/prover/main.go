@@ -2,29 +2,32 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
-	mimc "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/frontend"
+	"golang.org/x/crypto/sha3"
 
 	multischnorr "github.com/cowprotocol/Zk-benchmark/gnark/multi-schnorr"
 	"github.com/cowprotocol/Zk-benchmark/gnark/multi-schnorr/utils"
 )
 
 type SolidityOutput struct {
-	A      [2]*big.Int
-	B      [2][2]*big.Int
-	C      [2]*big.Int
-	Inputs [3]*big.Int // [Root, Message, SumValid]
+	A          [2]*big.Int
+	B          [2][2]*big.Int
+	C          [2]*big.Int
+	Inputs     [3]*big.Int // [Root, Message, SumValid]
+	MessageHex string
 }
 
 type PublicInputs struct {
@@ -33,31 +36,49 @@ type PublicInputs struct {
 	SumValid *big.Int
 }
 
-const outputPath = "output.json"
-const vkPath = "../setup/multischnorr.g16.vk"
+const (
+	csPath     = "../circuit.r1cs"
+	pkPath     = "../setup/multischnorr.g16.pk"
+	outputPath = "output.json"
+	vkPath     = "../setup/multischnorr.g16.vk"
+)
 
-func frFromStringMiMC(s string) fr.Element {
-	h := mimc.NewMiMC()
-	h.Write([]byte(s))
-	sum := h.Sum(nil)
+func frFromKeccak(input string) fr.Element {
+	var bytes []byte
+	if strings.HasPrefix(input, "0x") {
+		hexStr := strings.TrimPrefix(input, "0x")
+		decoded, err := hex.DecodeString(hexStr)
+		if err != nil {
+			bytes = []byte(input)
+		} else {
+			bytes = decoded
+		}
+	} else {
+		bytes = []byte(input)
+	}
+
+	h := sha3.NewLegacyKeccak256()
+	h.Write(bytes)
+	digest := h.Sum(nil)
+	r := fr.Modulus()
+	bi := new(big.Int).SetBytes(digest)
+	bi.Mod(bi, r)
 	var out fr.Element
-	_ = out.SetBytes(sum)
+	out.SetBigInt(bi)
 	return out
 }
 
-// msgToHash is hashed to Fr with MiMC (must match challenge construction).
+// msgToHash is hashed to Fr with Keccak.
 func GenerateProof(
 	csPath string,
 	pkPath string,
-	maxK int,
 	signerIndices []int,
 	msgToHash string,
 ) (groth16.Proof, witness.Witness, PublicInputs, error) {
 
 	wd, err := utils.PrepareWitnessData(
-		maxK,
 		signerIndices,
-		frFromStringMiMC(msgToHash),
+		frFromKeccak(msgToHash),
 		nil,
 		nil,
 	)
@@ -132,6 +153,7 @@ func verifyProofLocally(
 func convertProofToSolidityOutput(
 	proof groth16.Proof,
 	rootBI, msgBI, sumValidBI *big.Int,
+	msgToHash string,
 ) (SolidityOutput, error) {
 	var buf bytes.Buffer
 	if _, err := proof.WriteRawTo(&buf); err != nil {
@@ -156,12 +178,19 @@ func convertProofToSolidityOutput(
 	b[1][1] = new(big.Int).SetBytes(proofBytes[fpSize*5 : fpSize*6])
 	c[0] = new(big.Int).SetBytes(proofBytes[fpSize*6 : fpSize*7])
 	c[1] = new(big.Int).SetBytes(proofBytes[fpSize*7 : fpSize*8])
+	var messageHex string
+	if strings.HasPrefix(msgToHash, "0x") {
+		messageHex = msgToHash
+	} else {
+		messageHex = "0x" + hex.EncodeToString([]byte(msgToHash))
+	}
 
 	output := SolidityOutput{
-		A:      a,
-		B:      b,
-		C:      c,
-		Inputs: [3]*big.Int{rootBI, msgBI, sumValidBI},
+		A:          a,
+		B:          b,
+		C:          c,
+		Inputs:     [3]*big.Int{rootBI, msgBI, sumValidBI},
+		MessageHex: messageHex,
 	}
 
 	fmt.Println("\n=== Solidity Output ===")
@@ -183,6 +212,10 @@ func convertProofToSolidityOutput(
 	fmt.Printf("  Root:     %s\n", rootBI.String())
 	fmt.Printf("  Message:  %s\n", msgBI.String())
 	fmt.Printf("  SumValid: %s\n", sumValidBI.String())
+
+	fmt.Printf("\nMessage:\n")
+	fmt.Printf("  Original: %s\n", msgToHash)
+	fmt.Printf("  Message in Bytes:      %s\n", messageHex)
 	fmt.Println("======================\n")
 
 	return output, nil
@@ -201,34 +234,29 @@ func readFromFile(path string, r interface {
 }
 
 func main() {
-	const (
-		csPath = "../circuit.r1cs"
-		pkPath = "../setup/multischnorr.g16.pk"
-	)
 
-	if len(os.Args) < 4 {
-		fmt.Fprintf(os.Stderr, "Usage: go run . <message> <maxK> <signer_indices...>\n")
-		fmt.Fprintf(os.Stderr, "Example: go run . 'Hello world' 64 0 1 2 3 4 5 6 7 8 9\n")
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Usage: go run . <message> <signer_indices...>\n")
+		fmt.Fprintf(os.Stderr, "Example: go run . 'Hello world' 0 1 2 3 4 5 6 7 8 9\n")
 		os.Exit(1)
 	}
 
 	msgToHash := os.Args[1]
-	maxK := atoiOrExit(os.Args[2], "maxK")
 
-	signerIndices := make([]int, 0, len(os.Args)-3)
-	for _, arg := range os.Args[3:] {
+	signerIndices := make([]int, 0, len(os.Args)-2)
+	for _, arg := range os.Args[2:] {
 		signerIndices = append(signerIndices, atoiOrExit(arg, "signer index"))
 	}
 
-	fmt.Printf("Generating proof with msg=%q, maxK=%d, signers=%v\n",
-		msgToHash, maxK, signerIndices)
+	fmt.Printf("Generating proof with msg=%q, signers=%v\n",
+		msgToHash, signerIndices)
 
-	proof, _, pubs, err := GenerateProof(csPath, pkPath, maxK, signerIndices, msgToHash)
+	proof, _, pubs, err := GenerateProof(csPath, pkPath, signerIndices, msgToHash)
 	if err != nil {
 		log.Fatalf("GenerateProof failed: %v", err)
 	}
 
-	solOut, err := convertProofToSolidityOutput(proof, pubs.Root, pubs.Message, pubs.SumValid)
+	solOut, err := convertProofToSolidityOutput(proof, pubs.Root, pubs.Message, pubs.SumValid, msgToHash)
 	if err != nil {
 		log.Fatalf("convertProofToSolidityOutput failed: %v", err)
 	}
@@ -247,13 +275,15 @@ func atoiOrExit(s string, name string) int {
 func writeProofJSON(out SolidityOutput) {
 	data := fmt.Sprintf(`{
   	"proof": [%s,%s,%s,%s,%s,%s,%s,%s],
-  	"input": [%s,%s,%s]
+  	"input": [%s,%s,%s],
+	"messageHex":"%s"
 	}`,
 		out.A[0], out.A[1],
 		out.B[0][0], out.B[0][1],
 		out.B[1][0], out.B[1][1],
 		out.C[0], out.C[1],
 		out.Inputs[0], out.Inputs[1], out.Inputs[2],
+		out.MessageHex,
 	)
 
 	outPath := utils.RepoPath("../proof.json")

@@ -10,6 +10,7 @@ import (
 	"runtime"
 
 	fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	multischnorr "github.com/cowprotocol/Zk-benchmark/gnark/multi-schnorr"
 )
 
 type WitnessData struct {
@@ -107,12 +108,12 @@ func LoadKeysFromFile() ([]KeyPair, error) {
 }
 
 func PrepareWitnessData(
-	maxK int,
 	signerIndices []int,
 	message fr.Element,
 	rng io.Reader,
 	nonce *big.Int,
 ) (*WitnessData, error) {
+	maxK := multischnorr.MaxK
 	if len(signerIndices) > maxK {
 		return nil, fmt.Errorf("signerindices (%d) > maxK (%d)", len(signerIndices), maxK)
 	}

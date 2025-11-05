@@ -36,6 +36,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_DIR="$ROOT/setup"
 CONTRACT_DIR="$ROOT/contract"
 MERKLE_FILE="$ROOT/merkle_root.txt"
+DEPLOYMENT_FILE="$ROOT/deployment.json"
 
 if [[ -z "$MERKLE_ROOT" ]]; then
   if [[ -f "$MERKLE_FILE" ]]; then
@@ -61,14 +62,47 @@ pushd "$CONTRACT_DIR" >/dev/null
   forge build
 
   echo ">> Deploying to Sepolia..."
-  forge script script/DeployMultiSchnorrVerifier.s.sol:DeployMultischnorr \
+  DEPLOY_OUTPUT=$(forge script script/DeployMultiSchnorrVerifier.s.sol:DeployMultischnorr \
       --rpc-url "$RPC_URL" \
       --private-key "$PK" \
       --broadcast \
       --sig "run(uint256,uint256)" "$THRESHOLD" "$MERKLE_ROOT" \
       --etherscan-api-key "$ETHERSCAN_API_KEY" \
       --verify \
-      -vvvv
+      -vvvv 2>&1)
+
+echo "$DEPLOY_OUTPUT"   
+
+VERIFIER_ADDR=$(echo "$DEPLOY_OUTPUT" | grep "Verifier deployed at:" | grep -oE "0x[a-fA-F0-9]{40}" | head -1)
+MULTISCHNORR_ADDR=$(echo "$DEPLOY_OUTPUT" | grep "MultischnorrVerifier deployed at:" | grep -oE "0x[a-fA-F0-9]{40}" | head -1)
+OWNER_ADDR=$(echo "$DEPLOY_OUTPUT" | grep "owner:" | grep -oE "0x[a-fA-F0-9]{40}" | head -1)
+
+  if [[ -z "$VERIFIER_ADDR" || -z "$MULTISCHNORR_ADDR" ]]; then
+    echo "Warning: Could not extract contract addresses from deployment output."
+    echo "Please manually create $DEPLOYMENT_FILE with the following structure:"
+    cat <<EOF
+{
+  "network": "sepolia",
+  "verifier": "0x...",
+  "multiSchnorrVerifier": "0x...",
+  "owner": "0x...",
+  "deployedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+  else
+    # Save deployment info to JSON file
+    cat > "$DEPLOYMENT_FILE" <<EOF
+{
+  "network": "sepolia",
+  "verifier": "$VERIFIER_ADDR",
+  "multiSchnorrVerifier": "$MULTISCHNORR_ADDR",
+  "owner": "$OWNER_ADDR",
+  "deployedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+echo ">> Deployment info saved to $DEPLOYMENT_FILE"
+  fi
 
 popd >/dev/null
 
