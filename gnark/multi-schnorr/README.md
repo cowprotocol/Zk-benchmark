@@ -61,9 +61,9 @@ They bind the validator set’s `Merkle root` and `threshold` to the `Multischno
 
 The scripts can be run locally as well as in a devcontainer.
 
-To run the scripts locally, make sure [go]("https://go.dev/doc/install) and [foundry]("https://getfoundry.sh/introduction/installation/") are installed in the system.
+To run the scripts locally, make sure [golang](https://go.dev/doc/install) and [foundry](https://getfoundry.sh/introduction/installation/) are installed in the system.
 
-To run the scripts using the devcontainer, make sure VScode and [Docker]("https://www.docker.com/get-started/") is installed and running.
+To run the scripts using the devcontainer, make sure VScode and [Docker](https://www.docker.com/get-started/) is installed and running.
 
 Running a Devcontainer: VS Code → Command Palette → “Dev Containers: Rebuild and Reopen in Container”
 
