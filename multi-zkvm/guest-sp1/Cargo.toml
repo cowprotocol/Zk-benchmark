@@ -1,0 +1,12 @@
+[package]
+name = "guest-sp1"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+guest  = { path = "../guest" }
+common = { path = "../common" }
+
+sp1-zkvm   = { version = "5.2.2", default-features = false, features = ["lib"]}
+k256         = { version = "=0.13.4", default-features = false, features = ["schnorr","alloc"] }
+tiny-keccak  = { version = "=2.0.2",  default-features = false, features = ["keccak"] }
