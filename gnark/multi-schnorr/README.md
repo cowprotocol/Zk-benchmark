@@ -1,6 +1,7 @@
 # Multi-Schnorr ZK Prover
 
 Gnark groth16 circuit and tooling for verifying multiple Schnorr signatures against a Merkle-committed validator set.
+Uses babyJubJub over BN254 Fr and MiMC hash function for optimal proving time and on-chain verification compatability.
 
 ### Circuit Overview
 
