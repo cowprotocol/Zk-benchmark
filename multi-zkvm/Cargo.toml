@@ -12,6 +12,6 @@ ere-risc0        = {git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
 ere-zisk        = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
 
 # utils
-anyhow = "1"
-serde = { version = "1.0.200", features = ["derive"] }
-serde_json = "1"
+anyhow = { version = "1.0.86", default-features = false }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = { version = "1.0.117", default-features = false }
