@@ -15,7 +15,7 @@ ere-zkvm-interface = { workspace = true }
 ere-sp1   = { workspace = true }
 ere-risc0 = { workspace = true }
 ere-zisk  = { workspace = true }
-ere-pico  = { workspace = true }
+# ere-pico  = { workspace = true }
 common           = { path = "../common" }
 tiny-keccak = { version = "2", features = ["keccak"] }
 k256        = { version = "=0.13.4", default-features = false, features = ["schnorr","alloc","ecdsa", "std"] }
