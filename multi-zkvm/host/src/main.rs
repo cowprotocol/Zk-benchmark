@@ -2,10 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use common::{codec, Byte32, Candidate, GuestInput, PubKey, SchnorrSig};
 use ere_dockerized::{EreDockerizedCompiler, EreDockerizedzkVM, ErezkVM};
-use ere_zkvm_interface::{
-    compiler::Compiler,
-    zkvm::{zkVM, ProofKind, ProverResourceType},
-};
+use ere_zkvm_interface::{zkVM, Compiler, ProofKind, ProverResourceType};
 use k256::ecdsa::{SigningKey as EcdsaSigningKey, VerifyingKey as EcdsaVerifyingKey};
 use k256::{
     schnorr::{signature::Signer as _, Signature, SigningKey},
