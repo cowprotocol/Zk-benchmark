@@ -18,7 +18,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
 
-use ere_jolt::{EreJolt, RV32_IM_JOLT_ZKVM_ELF as JOLT_COMPILER};
 use ere_pico::{ErePico, RV32_IM_PICO_ZKVM_ELF as PICO_COMPILER};
 use ere_risc0::{EreRisc0, RV32_IM_RISC0_ZKVM_ELF as RISC0_COMPILER};
 use ere_sp1::{EreSP1, RV32_IM_SUCCINCT_ZKVM_ELF as SP1_COMPILER};
@@ -33,13 +32,12 @@ struct Args {
     #[arg(long)]
     signers: String,
 
-    #[arg(long, value_parser = ["sp1", "risc0", "jolt", "zisk", "pico"])]
+    #[arg(long, value_parser = ["sp1", "risc0", "zisk", "pico"])]
     zkvm: String,
 }
 
 const GUEST_SP1_DIR: &str = "guest-sp1";
 const GUEST_RISC0_DIR: &str = "guest-risc0";
-const GUEST_JOLT_DIR: &str = "guest-jolt";
 const GUEST_ZISK_DIR: &str = "guest-zisk";
 const GUEST_PICO_DIR: &str = "guest-pico";
 
@@ -47,7 +45,6 @@ const GUEST_PICO_DIR: &str = "guest-pico";
 enum Backend {
     SP1,
     Risc0,
-    Jolt,
     Zisk,
     Pico,
 }
@@ -56,7 +53,6 @@ fn parse_backend(s: &str) -> Backend {
     match s {
         "sp1" => Backend::SP1,
         "risc0" => Backend::Risc0,
-        "jolt" => Backend::Jolt,
         "zisk" => Backend::Zisk,
         "pico" => Backend::Pico,
         other => unreachable!("unknown zkvm: {other}"),
@@ -67,7 +63,6 @@ fn guest_dir_for_backend(cwd: &Path, backend: Backend) -> PathBuf {
     match backend {
         Backend::SP1 => cwd.join(GUEST_SP1_DIR),
         Backend::Risc0 => cwd.join(GUEST_RISC0_DIR),
-        Backend::Jolt => cwd.join(GUEST_JOLT_DIR),
         Backend::Zisk => cwd.join(GUEST_ZISK_DIR),
         Backend::Pico => cwd.join(GUEST_PICO_DIR),
     }
@@ -322,12 +317,6 @@ fn main() -> Result<()> {
             let program = compiler.compile(&guest_dir)?;
             let zkvm = EreRisc0::new(program, ProverResourceType::Gpu)?;
             run_on_vm("risc0", zkvm, &input_bytes)?;
-        }
-        Backend::Jolt => {
-            let compiler = JOLT_COMPILER;
-            let program = compiler.compile(&guest_dir)?;
-            let zkvm = EreJolt::new(program, ProverResourceType::Cpu)?;
-            run_on_vm("jolt", zkvm, &input_bytes)?;
         }
         Backend::Zisk => {
             let compiler = ZISK_COMPILER;

@@ -26,13 +26,12 @@ struct Args {
     #[arg(long)]
     signers: String,
 
-    #[arg(long, value_parser = ["sp1", "risc0", "jolt", "zisk", "pico"])]
+    #[arg(long, value_parser = ["sp1", "risc0", "zisk", "pico"])]
     zkvm: String,
 }
 
 const GUEST_SP1_DIR: &str = "guest-sp1";
 const GUEST_RISC0_DIR: &str = "guest-risc0";
-const GUEST_JOLT_DIR: &str = "guest-jolt";
 const GUEST_ZISK_DIR: &str = "guest-zisk";
 const GUEST_PICO_DIR: &str = "guest-pico";
 
@@ -40,7 +39,6 @@ fn map_vm_and_dir(cwd: &Path, zkvm: &str) -> (ErezkVM, PathBuf) {
     match zkvm {
         "sp1" => (ErezkVM::SP1, cwd.join(GUEST_SP1_DIR)),
         "risc0" => (ErezkVM::Risc0, cwd.join(GUEST_RISC0_DIR)),
-        "jolt" => (ErezkVM::Jolt, cwd.join(GUEST_JOLT_DIR)),
         "zisk" => (ErezkVM::Zisk, cwd.join(GUEST_ZISK_DIR)),
         "pico" => (ErezkVM::Pico, cwd.join(GUEST_PICO_DIR)),
         _ => unreachable!("unknown zkvm: {}", zkvm),

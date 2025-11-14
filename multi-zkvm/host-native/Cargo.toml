@@ -14,7 +14,6 @@ ere-dockerized   = { workspace = true }
 ere-zkvm-interface = { workspace = true }
 ere-sp1   = { workspace = true }
 ere-risc0 = { workspace = true }
-ere-jolt  = { workspace = true }
 ere-zisk  = { workspace = true }
 ere-pico  = { workspace = true }
 common           = { path = "../common" }
