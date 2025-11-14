@@ -1,6 +1,7 @@
 [workspace]
-members = ["host", "guest", "common", "guest-sp1"]
+members = ["host", "guest", "common"]
 resolver = "2"
+exclude = ["guest-sp1", "guest-risc0", "guest-jolt", "guest-zisk", "guest-pico"]
 
 [workspace.dependencies]
 ere-zkvm-interface = { git = "https://github.com/eth-act/ere.git"}
@@ -10,7 +11,3 @@ ere-dockerized = { git = "https://github.com/eth-act/ere.git"}
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[patch.crates-io]
-tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-4.0.0" }
-k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-5.0.0" }

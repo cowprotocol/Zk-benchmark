@@ -1,0 +1,14 @@
+[package]
+name = "guest-pico"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pico-sdk = { git = "https://github.com/brevis-network/pico", tag = "v1.1.7" }
+
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak", tag = "pico-patch-v1.0.0-keccak-v2.0.2", features = ["keccak"] }
+
+k256        = { version = "=0.13.4", default-features = false, features = ["alloc"] }
+
+common = { path = "../common" }
+guest  = { path = "../guest" }

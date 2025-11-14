@@ -6,7 +6,11 @@ edition = "2021"
 [dependencies]
 guest  = { path = "../guest" }
 common = { path = "../common" }
+sp1-zkvm = { version = "5.2.2", default-features = false, features = ["lib"] }
 
-sp1-zkvm   = { version = "5.2.2", default-features = false, features = ["lib"]}
-k256         = { version = "=0.13.4", default-features = false, features = ["schnorr","alloc"] }
-tiny-keccak  = { version = "=2.0.2",  default-features = false, features = ["keccak"] }
+k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-5.0.0", default-features = false, features = ["schnorr","alloc"] }
+tiny-keccak = { version = "2", default-features = false, features = ["keccak"] }
+
+[patch.crates-io]
+k256        = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-5.0.0" }
+tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-4.0.0" }

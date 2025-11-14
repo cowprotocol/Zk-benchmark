@@ -13,5 +13,5 @@ serde_json       = { workspace = true }
 ere-dockerized   = { workspace = true }
 ere-zkvm-interface = { workspace = true }
 common           = { path = "../common" }
-tiny-keccak      = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-4.0.0", features = ["keccak"] }
-k256             = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-5.0.0" }
+tiny-keccak = { version = "2", features = ["keccak"] }
+k256        = { version = "=0.13.4", default-features = false, features = ["schnorr","alloc","ecdsa", "std"] }

@@ -1,0 +1,15 @@
+[package]
+name = "guest-jolt"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+guest = []
+
+[dependencies]
+guest  = { path = "../guest" }
+common = { path = "../common" }
+k256 = { version = "0.13", default-features = false, features = ["schnorr", "alloc"] }
+jolt = { package = "jolt-sdk", git = "https://github.com/a16z/jolt", features = ["guest-std"] }
+
+sha3 = { version = "0.10", default-features = false }

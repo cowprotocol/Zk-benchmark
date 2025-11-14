@@ -1,0 +1,16 @@
+[package]
+name = "guest-risc0"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+guest  = { path = "../guest" }
+common = { path = "../common" }
+risc0-zkvm = { version = "3.0.3", default-features = false, features = ["std"]}
+
+k256 = { git = "https://github.com/risc0/RustCrypto-elliptic-curves", tag = "k256/v0.13.3-risczero.1" , default-features = false, features = ["schnorr","alloc"] }
+tiny-keccak = { version = "2", default-features = false, features = ["keccak"] }
+
+[patch.crates-io]
+tiny-keccak = { git = "https://github.com/risc0/tiny-keccak", tag = "tiny-keccak/v2.0.2-risczero.0" }
+k256 = { git = "https://github.com/risc0/RustCrypto-elliptic-curves", tag = "k256/v0.13.3-risczero.1" }

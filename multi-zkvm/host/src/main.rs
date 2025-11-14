@@ -6,15 +6,15 @@ use ere_zkvm_interface::{
     compiler::Compiler,
     zkvm::{zkVM, ProofKind, ProverResourceType},
 };
+use k256::ecdsa::{SigningKey as EcdsaSigningKey, VerifyingKey as EcdsaVerifyingKey};
 use k256::{
-    ecdsa,
     schnorr::{signature::Signer as _, Signature, SigningKey},
     SecretKey,
 };
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::{fs, path::PathBuf};
+use std::fs;
+use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
 
 #[derive(Parser, Debug)]
@@ -25,6 +25,26 @@ struct Args {
 
     #[arg(long)]
     signers: String,
+
+    #[arg(long, value_parser = ["sp1", "risc0", "jolt", "zisk", "pico"])]
+    zkvm: String,
+}
+
+const GUEST_SP1_DIR: &str = "guest-sp1";
+const GUEST_RISC0_DIR: &str = "guest-risc0";
+const GUEST_JOLT_DIR: &str = "guest-jolt";
+const GUEST_ZISK_DIR: &str = "guest-zisk";
+const GUEST_PICO_DIR: &str = "guest-pico";
+
+fn map_vm_and_dir(cwd: &Path, zkvm: &str) -> (ErezkVM, PathBuf) {
+    match zkvm {
+        "sp1" => (ErezkVM::SP1, cwd.join(GUEST_SP1_DIR)),
+        "risc0" => (ErezkVM::Risc0, cwd.join(GUEST_RISC0_DIR)),
+        "jolt" => (ErezkVM::Jolt, cwd.join(GUEST_JOLT_DIR)),
+        "zisk" => (ErezkVM::Zisk, cwd.join(GUEST_ZISK_DIR)),
+        "pico" => (ErezkVM::Pico, cwd.join(GUEST_PICO_DIR)),
+        _ => unreachable!("unknown zkvm: {}", zkvm),
+    }
 }
 
 fn keccak2(a: &Byte32, b: &Byte32) -> Byte32 {
@@ -87,8 +107,8 @@ fn load_or_generate_64_keys<P: AsRef<Path>>(keys_path: P) -> Result<KeySet> {
         let sk = SecretKey::random(&mut OsRng);
 
         // Full uncompressed point for (ax, ay)
-        let ecdsa_signing: ecdsa::SigningKey = ecdsa::SigningKey::from(&sk);
-        let ecdsa_vk: ecdsa::VerifyingKey = ecdsa_signing.verifying_key().clone();
+        let ecdsa_signing: EcdsaSigningKey = EcdsaSigningKey::from(&sk);
+        let ecdsa_vk: EcdsaVerifyingKey = ecdsa_signing.verifying_key().clone();
         let enc = ecdsa_vk.to_encoded_point(false);
         let ax_bytes = enc.x().expect("uncompressed x");
         let ay_bytes = enc.y().expect("uncompressed y");
@@ -195,7 +215,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let workspace_root = std::env::current_dir()?.canonicalize()?;
-    let guest_dir = workspace_root.join("guest-sp1");
+    let (vm, guest_dir) = map_vm_and_dir(&workspace_root, &args.zkvm);
     let keys_path = "keys.json".to_string();
 
     let keyset = load_or_generate_64_keys(&keys_path)?;
@@ -210,7 +230,7 @@ fn main() -> Result<()> {
     let signer_idxs = parse_signer_indices(&args.signers)?;
     println!("Signers = {:?}", signer_idxs);
 
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(64);
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(32);
     for (i, dk) in keyset.keys.iter().enumerate() {
         let is_signer = signer_idxs.binary_search(&i).is_ok();
         let sig = if is_signer {
@@ -237,21 +257,30 @@ fn main() -> Result<()> {
     };
     let input_bytes = codec::encode(&input);
 
-    let compiler = EreDockerizedCompiler::new(ErezkVM::SP1, &workspace_root)?;
+    let compiler = EreDockerizedCompiler::new(vm, &workspace_root)?;
     let program = compiler.compile(&guest_dir)?;
     println!("mount = {}", workspace_root.display());
     println!("guest = {}", guest_dir.display());
 
-    let zkvm = EreDockerizedzkVM::new(ErezkVM::SP1, program, ProverResourceType::Cpu)?;
+    let zkvm = EreDockerizedzkVM::new(vm, program, ProverResourceType::Cpu)?;
     let (public_values_ex, exec_report) = zkvm.execute(&input_bytes)?;
     println!(
         "Execute OK. Cycles: {} (duration: {:?})",
         exec_report.total_num_cycles, exec_report.execution_duration
     );
+    println!("Public values: {:?}", public_values_ex);
+    println!("exec report: {:?}", exec_report);
 
-    let (public_values_pr, _proof, proving_report) =
-        zkvm.prove(&input_bytes, ProofKind::Compressed)?;
+    let proof_kind = match vm {
+        ErezkVM::Pico => ProofKind::Compressed,
+        _ => ProofKind::Groth16,
+    };
+
+    let (public_values_pr, _proof, proving_report) = zkvm.prove(&input_bytes, proof_kind)?;
     println!("Proved in {:?}", proving_report.proving_time);
+    println!("Public values: {:?}", public_values_pr);
+    println!("Proof {:?}", _proof);
+    println!("proving report: {:?}", proving_report);
 
     Ok(())
 }
