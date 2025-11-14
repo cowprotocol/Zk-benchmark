@@ -1,11 +1,16 @@
 [workspace]
-members = ["host", "guest", "common"]
+members = ["host", "guest", "common", "host-native"]
 resolver = "2"
 exclude = ["guest-sp1", "guest-risc0", "guest-jolt", "guest-zisk", "guest-pico"]
 
 [workspace.dependencies]
 ere-zkvm-interface = { git = "https://github.com/eth-act/ere.git"}
 ere-dockerized = { git = "https://github.com/eth-act/ere.git"}
+ere-sp1        =  { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
+ere-jolt        = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
+ere-risc0        = {git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
+ere-pico        = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
+ere-zisk        = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
 
 # utils
 anyhow = "1"

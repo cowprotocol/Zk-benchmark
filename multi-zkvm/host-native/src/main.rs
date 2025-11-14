@@ -1,7 +1,8 @@
+#![allow(clippy::needless_return)]
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use common::{codec, Byte32, Candidate, GuestInput, PubKey, SchnorrSig};
-use ere_dockerized::{EreDockerizedCompiler, EreDockerizedzkVM, ErezkVM};
 use ere_zkvm_interface::{
     compiler::Compiler,
     zkvm::{zkVM, ProofKind, ProverResourceType},
@@ -16,6 +17,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
+
+use ere_jolt::{EreJolt, RV32_IM_JOLT_ZKVM_ELF as JOLT_COMPILER};
+use ere_pico::{ErePico, RV32_IM_PICO_ZKVM_ELF as PICO_COMPILER};
+use ere_risc0::{EreRisc0, RV32_IM_RISC0_ZKVM_ELF as RISC0_COMPILER};
+use ere_sp1::{EreSP1, RV32_IM_SUCCINCT_ZKVM_ELF as SP1_COMPILER};
+use ere_zisk::{EreZisk, RV32_IM_ZISK_ZKVM_ELF as ZISK_COMPILER};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -36,14 +43,33 @@ const GUEST_JOLT_DIR: &str = "guest-jolt";
 const GUEST_ZISK_DIR: &str = "guest-zisk";
 const GUEST_PICO_DIR: &str = "guest-pico";
 
-fn map_vm_and_dir(cwd: &Path, zkvm: &str) -> (ErezkVM, PathBuf) {
-    match zkvm {
-        "sp1" => (ErezkVM::SP1, cwd.join(GUEST_SP1_DIR)),
-        "risc0" => (ErezkVM::Risc0, cwd.join(GUEST_RISC0_DIR)),
-        "jolt" => (ErezkVM::Jolt, cwd.join(GUEST_JOLT_DIR)),
-        "zisk" => (ErezkVM::Zisk, cwd.join(GUEST_ZISK_DIR)),
-        "pico" => (ErezkVM::Pico, cwd.join(GUEST_PICO_DIR)),
-        _ => unreachable!("unknown zkvm: {}", zkvm),
+#[derive(Clone, Copy, Debug)]
+enum Backend {
+    SP1,
+    Risc0,
+    Jolt,
+    Zisk,
+    Pico,
+}
+
+fn parse_backend(s: &str) -> Backend {
+    match s {
+        "sp1" => Backend::SP1,
+        "risc0" => Backend::Risc0,
+        "jolt" => Backend::Jolt,
+        "zisk" => Backend::Zisk,
+        "pico" => Backend::Pico,
+        other => unreachable!("unknown zkvm: {other}"),
+    }
+}
+
+fn guest_dir_for_backend(cwd: &Path, backend: Backend) -> PathBuf {
+    match backend {
+        Backend::SP1 => cwd.join(GUEST_SP1_DIR),
+        Backend::Risc0 => cwd.join(GUEST_RISC0_DIR),
+        Backend::Jolt => cwd.join(GUEST_JOLT_DIR),
+        Backend::Zisk => cwd.join(GUEST_ZISK_DIR),
+        Backend::Pico => cwd.join(GUEST_PICO_DIR),
     }
 }
 
@@ -73,7 +99,8 @@ struct DiskKey {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct KeySet {
-    keys: Vec<DiskKey>, // len = 64
+    // len = 64
+    keys: Vec<DiskKey>,
 }
 
 fn hex32(bytes: &[u8; 32]) -> String {
@@ -211,11 +238,34 @@ fn message_to_32(msg_arg: &str) -> Result<Byte32> {
     })
 }
 
+fn run_on_vm<V: zkVM>(label: &str, mut zkvm: V, input_bytes: &[u8]) -> Result<()> {
+    let (public_values_ex, exec_report) = zkvm.execute(input_bytes)?;
+    println!(
+        "[{label}] Execute OK. Cycles: {} (duration: {:?})",
+        exec_report.total_num_cycles, exec_report.execution_duration
+    );
+    println!("[{label}] Public values (exec): {:?}", public_values_ex);
+    println!("[{label}] exec report: {:?}", exec_report);
+
+    let proof_kind = match label {
+        "pico" | "zisk" => ProofKind::Compressed,
+        _ => ProofKind::Groth16,
+    };
+
+    let (public_values_pr, proof, proving_report) = zkvm.prove(input_bytes, proof_kind)?;
+    println!("[{label}] Proved in {:?}", proving_report.proving_time);
+    println!("[{label}] Public values (prove): {:?}", public_values_pr);
+    println!("[{label}] proving report: {:?}", proving_report);
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    let backend = parse_backend(&args.zkvm);
     let workspace_root = std::env::current_dir()?.canonicalize()?;
-    let (vm, guest_dir) = map_vm_and_dir(&workspace_root, &args.zkvm);
+    let guest_dir = guest_dir_for_backend(&workspace_root, backend);
     let keys_path = "keys.json".to_string();
 
     let keyset = load_or_generate_64_keys(&keys_path)?;
@@ -257,31 +307,41 @@ fn main() -> Result<()> {
     };
     let input_bytes = codec::encode(&input);
 
-    let compiler = EreDockerizedCompiler::new(vm, &workspace_root)?;
-    let program = compiler.compile(&guest_dir)?;
-    println!("mount = {}", workspace_root.display());
-    println!("guest = {}", guest_dir.display());
+    println!("workspace_root = {}", workspace_root.display());
+    println!("guest_dir      = {}", guest_dir.display());
 
-    let zkvm = EreDockerizedzkVM::new(vm, program, ProverResourceType::Cpu)?;
-    let (public_values_ex, exec_report) = zkvm.execute(&input_bytes)?;
-    println!(
-        "Execute OK. Cycles: {} (duration: {:?})",
-        exec_report.total_num_cycles, exec_report.execution_duration
-    );
-    println!("Public values: {:?}", public_values_ex);
-    println!("exec report: {:?}", exec_report);
-
-    let proof_kind = match vm {
-        ErezkVM::Pico => ProofKind::Compressed,
-        ErezkVM::Zisk => ProofKind::Compressed,
-        _ => ProofKind::Groth16,
-    };
-
-    let (public_values_pr, _proof, proving_report) = zkvm.prove(&input_bytes, proof_kind)?;
-    println!("Proved in {:?}", proving_report.proving_time);
-    println!("Public values: {:?}", public_values_pr);
-    println!("Proof {:?}", _proof);
-    println!("proving report: {:?}", proving_report);
+    match backend {
+        Backend::SP1 => {
+            let compiler = SP1_COMPILER;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = EreSP1::new(program, ProverResourceType::Gpu)?;
+            run_on_vm("sp1", zkvm, &input_bytes)?;
+        }
+        Backend::Risc0 => {
+            let compiler = RISC0_COMPILER;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = EreRisc0::new(program, ProverResourceType::Gpu)?;
+            run_on_vm("risc0", zkvm, &input_bytes)?;
+        }
+        Backend::Jolt => {
+            let compiler = JOLT_COMPILER;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = EreJolt::new(program, ProverResourceType::Cpu)?;
+            run_on_vm("jolt", zkvm, &input_bytes)?;
+        }
+        Backend::Zisk => {
+            let compiler = ZISK_COMPILER;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = EreZisk::new(program, ProverResourceType::Gpu)?;
+            run_on_vm("zisk", zkvm, &input_bytes)?;
+        }
+        Backend::Pico => {
+            let compiler = PICO_COMPILER;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = ErePico::new(program, ProverResourceType::Cpu)?;
+            run_on_vm("pico", zkvm, &input_bytes)?;
+        }
+    }
 
     Ok(())
 }
