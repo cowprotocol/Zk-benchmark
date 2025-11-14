@@ -308,26 +308,26 @@ fn main() -> Result<()> {
     match backend {
         Backend::SP1 => {
             let compiler = SP1_COMPILER;
-            let program = compiler.compile(&guest_dir)?;
-            let zkvm = EreSP1::new(program, ProverResourceType::Gpu)?;
+            let program = compiler.compile(guest_dir)?;
+            let zkvm = EreSP1::new(program, ProverResourceType::Cpu);
             run_on_vm("sp1", zkvm, &input_bytes)?;
         }
         Backend::Risc0 => {
             let compiler = RISC0_COMPILER;
-            let program = compiler.compile(&guest_dir)?;
+            let program = compiler.compile(guest_dir)?;
             let zkvm = EreRisc0::new(program, ProverResourceType::Gpu)?;
             run_on_vm("risc0", zkvm, &input_bytes)?;
         }
         Backend::Zisk => {
             let compiler = ZISK_COMPILER;
-            let program = compiler.compile(&guest_dir)?;
+            let program = compiler.compile(guest_dir)?;
             let zkvm = EreZisk::new(program, ProverResourceType::Gpu)?;
             run_on_vm("zisk", zkvm, &input_bytes)?;
         }
         Backend::Pico => {
             let compiler = PICO_COMPILER;
-            let program = compiler.compile(&guest_dir)?;
-            let zkvm = ErePico::new(program, ProverResourceType::Cpu)?;
+            let program = compiler.compile(guest_dir)?;
+            let zkvm = ErePico::new(program, ProverResourceType::Cpu);
             run_on_vm("pico", zkvm, &input_bytes)?;
         }
     }
