@@ -13,8 +13,10 @@ cargo run -p host -- \
 
 For running in a RTX 4090/GPU instance
 
+use +nightly only for pico
+
 ```
-cargo +nightly run -p host-native -- \
+cargo run -p host-native -- \
   --zkvm sp1 \
   --msg "hello world" \
   --signers "$(seq -s ',' 0 47)"
