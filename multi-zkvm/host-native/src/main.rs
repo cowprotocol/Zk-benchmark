@@ -15,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
 
-use ere_pico::{compiler::RustRv32ima as PicoCompiler, ErePico};
+// use ere_pico::{compiler::RustRv32ima as PicoCompiler, ErePico};
 use ere_risc0::{compiler::RustRv32ima as Risc0Compiler, EreRisc0};
 use ere_sp1::{compiler::RustRv32ima as Sp1Compiler, EreSP1};
 use ere_zisk::{compiler::RustRv64imaCustomized as ZiskCompiler, EreZisk};
@@ -36,14 +36,14 @@ struct Args {
 const GUEST_SP1_DIR: &str = "guest-sp1";
 const GUEST_RISC0_DIR: &str = "guest-risc0";
 const GUEST_ZISK_DIR: &str = "guest-zisk";
-const GUEST_PICO_DIR: &str = "guest-pico";
+// const GUEST_PICO_DIR: &str = "guest-pico";
 
 #[derive(Clone, Copy, Debug)]
 enum Backend {
     SP1,
     Risc0,
     Zisk,
-    Pico,
+    // Pico,
 }
 
 fn parse_backend(s: &str) -> Backend {
@@ -51,7 +51,7 @@ fn parse_backend(s: &str) -> Backend {
         "sp1" => Backend::SP1,
         "risc0" => Backend::Risc0,
         "zisk" => Backend::Zisk,
-        "pico" => Backend::Pico,
+        // "pico" => Backend::Pico,
         other => unreachable!("unknown zkvm: {other}"),
     }
 }
@@ -61,7 +61,7 @@ fn guest_dir_for_backend(cwd: &Path, backend: Backend) -> PathBuf {
         Backend::SP1 => cwd.join(GUEST_SP1_DIR),
         Backend::Risc0 => cwd.join(GUEST_RISC0_DIR),
         Backend::Zisk => cwd.join(GUEST_ZISK_DIR),
-        Backend::Pico => cwd.join(GUEST_PICO_DIR),
+        // Backend::Pico => cwd.join(GUEST_PICO_DIR),
     }
 }
 
@@ -322,13 +322,12 @@ fn main() -> Result<()> {
             let program = compiler.compile(&guest_dir)?;
             let zkvm = EreZisk::new(program, ProverResourceType::Gpu)?;
             run_on_vm("zisk", zkvm, &zkvm_input)?;
-        }
-        Backend::Pico => {
-            let compiler = PicoCompiler;
-            let program = compiler.compile(&guest_dir)?;
-            let zkvm = ErePico::new(program, ProverResourceType::Cpu);
-            run_on_vm("pico", zkvm, &zkvm_input)?;
-        }
+        } // Backend::Pico => {
+          //     let compiler = PicoCompiler;
+          //     let program = compiler.compile(&guest_dir)?;
+          //     let zkvm = ErePico::new(program, ProverResourceType::Cpu);
+          //     run_on_vm("pico", zkvm, &zkvm_input)?;
+          // }
     }
 
     Ok(())
