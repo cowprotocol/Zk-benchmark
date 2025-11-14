@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 guest  = { path = "../guest" }
 common = { path = "../common" }
-sp1-zkvm = { version = "5.0.0", default-features = false, features = ["lib"] }
+sp1-zkvm = { version = "5.2.2", default-features = false, features = ["lib"] }
 
 k256 = { git = "https://github.com/sp1-patches/elliptic-curves", tag = "patch-k256-13.4-sp1-5.0.0", default-features = false, features = ["schnorr","alloc"] }
 tiny-keccak = { version = "2", default-features = false, features = ["keccak"] }
