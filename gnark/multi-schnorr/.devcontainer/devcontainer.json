@@ -1,0 +1,9 @@
+{
+  "name": "Multi-Schnorr ZK Prover",
+  "image": "mcr.microsoft.com/devcontainers/go:2-1.24-bookworm",
+  "remoteUser": "vscode",
+  "postCreateCommand": "bash -lc \"[ -f go.mod ] && go mod download || true; sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ca-certificates curl git; curl -L https://foundry.paradigm.xyz | bash; export PATH=\\\"$HOME/.foundry/bin:$PATH\\\"; $HOME/.foundry/bin/foundryup; $HOME/.foundry/bin/forge --version && $HOME/.foundry/bin/cast --version\"",
+  "mounts": [
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,consistency=cached"
+  ]
+}
