@@ -1,0 +1,21 @@
+[package]
+name = "host-native"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow           = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+rand_core = "0.6"
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+ere-dockerized   = { workspace = true }
+ere-zkvm-interface = { workspace = true }
+ere-sp1   = { workspace = true }
+ere-risc0 = { workspace = true }
+ere-zisk  = { workspace = true }
+# ere-pico  = { workspace = true }
+common           = { path = "../common" }
+tiny-keccak = { version = "2", features = ["keccak"] }
+k256        = { version = "=0.13.4", default-features = false, features = ["schnorr","alloc","ecdsa", "std"] }
