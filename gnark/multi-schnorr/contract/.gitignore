@@ -1,0 +1,6 @@
+# Compiler files
+cache/
+out/
+lib/
+build/
+src/Verifier.sol
