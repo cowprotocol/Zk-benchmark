@@ -282,16 +282,23 @@ fn main() -> Result<()> {
     let signer_idxs = parse_signer_indices(&args.signers)?;
     println!("Signers = {:?}", signer_idxs);
 
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(32);
-    for idx in &signer_idxs {
-        let dk = &keyset.keys[*idx];
-        let sig = schnorr_sign(&dk.sk_hex, &message)?;
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(64);
+    for (i, dk) in keyset.keys.iter().enumerate() {
+        let is_signer = signer_idxs.binary_search(&i).is_ok();
+        let sig = if is_signer {
+            schnorr_sign(&dk.sk_hex, &message)?
+        } else {
+            SchnorrSig {
+                rx: [0u8; 32],
+                s: [0u8; 32],
+            }
+        };
         let ax = parse_hex32(&dk.ax_hex)?;
         let ay = parse_hex32(&dk.ay_hex)?;
         candidates.push(Candidate {
             key: PubKey { ax, ay },
             sig,
-            is_ignore: 0,
+            is_ignore: if is_signer { 0 } else { 1 },
         });
     }
 
