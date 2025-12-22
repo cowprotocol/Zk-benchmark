@@ -3,7 +3,10 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use common::{codec, Byte32, Candidate, GuestInput, PubKey, SchnorrSig};
-use ere_zkvm_interface::{zkVM, Compiler, Input, InputItem, ProofKind, ProverResourceType};
+use ere_zkvm_interface::{
+    compiler::Compiler,
+    zkvm::{Input, ProofKind, ProverResourceType, zkVM},
+};
 use k256::ecdsa::{SigningKey as EcdsaSigningKey, VerifyingKey as EcdsaVerifyingKey};
 use k256::{
     schnorr::{signature::Signer as _, Signature, SigningKey},
@@ -15,13 +18,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
 
-// use ere_pico::{compiler::RustRv32ima as PicoCompiler, ErePico};
-use ere_risc0::{compiler::RustRv32ima as Risc0Compiler, EreRisc0};
-use ere_sp1::{compiler::RustRv32ima as Sp1Compiler, EreSP1};
+use ere_sp1::{compiler::RustRv32imaCustomized as Sp1Compiler, EreSP1};
 use ere_zisk::{compiler::RustRv64imaCustomized as ZiskCompiler, EreZisk};
+use ere_risc0::{compiler::RustRv32imaCustomized as Risc0Compiler, EreRisc0};
+#[cfg(feature = "pico")]
+use ere_pico::{compiler::RustRv32imaCustomized as PicoCompiler, ErePico};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
 struct Args {
     #[arg(long)]
     msg: String,
@@ -36,14 +39,15 @@ struct Args {
 const GUEST_SP1_DIR: &str = "guest-sp1";
 const GUEST_RISC0_DIR: &str = "guest-risc0";
 const GUEST_ZISK_DIR: &str = "guest-zisk";
-// const GUEST_PICO_DIR: &str = "guest-pico";
-
-#[derive(Clone, Copy, Debug)]
+#[cfg(feature = "pico")]
+const GUEST_PICO_DIR: &str = "guest-pico";
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Backend {
     SP1,
     Risc0,
     Zisk,
-    // Pico,
+    #[cfg(feature = "pico")]
+    Pico,
 }
 
 fn parse_backend(s: &str) -> Backend {
@@ -51,7 +55,8 @@ fn parse_backend(s: &str) -> Backend {
         "sp1" => Backend::SP1,
         "risc0" => Backend::Risc0,
         "zisk" => Backend::Zisk,
-        // "pico" => Backend::Pico,
+        #[cfg(feature = "pico")]
+        "pico" => Backend::Pico,
         other => unreachable!("unknown zkvm: {other}"),
     }
 }
@@ -61,7 +66,8 @@ fn guest_dir_for_backend(cwd: &Path, backend: Backend) -> PathBuf {
         Backend::SP1 => cwd.join(GUEST_SP1_DIR),
         Backend::Risc0 => cwd.join(GUEST_RISC0_DIR),
         Backend::Zisk => cwd.join(GUEST_ZISK_DIR),
-        // Backend::Pico => cwd.join(GUEST_PICO_DIR),
+        #[cfg(feature = "pico")]
+        Backend::Pico => cwd.join(GUEST_PICO_DIR),
     }
 }
 
@@ -185,8 +191,11 @@ fn parse_signer_indices(s: &str) -> Result<Vec<usize>> {
     }
     let mut out = Vec::new();
     for part in s.split(',') {
-        let idx: usize = part
-            .trim()
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let idx: usize = trimmed
             .parse()
             .with_context(|| format!("bad index: {part}"))?;
         anyhow::ensure!(idx < 64, "signer index out of range: {idx}");
@@ -274,22 +283,15 @@ fn main() -> Result<()> {
     println!("Signers = {:?}", signer_idxs);
 
     let mut candidates: Vec<Candidate> = Vec::with_capacity(32);
-    for (i, dk) in keyset.keys.iter().enumerate() {
-        let is_signer = signer_idxs.binary_search(&i).is_ok();
-        let sig = if is_signer {
-            schnorr_sign(&dk.sk_hex, &message)?
-        } else {
-            SchnorrSig {
-                rx: [0u8; 32],
-                s: [0u8; 32],
-            }
-        };
+    for idx in &signer_idxs {
+        let dk = &keyset.keys[*idx];
+        let sig = schnorr_sign(&dk.sk_hex, &message)?;
         let ax = parse_hex32(&dk.ax_hex)?;
         let ay = parse_hex32(&dk.ay_hex)?;
         candidates.push(Candidate {
             key: PubKey { ax, ay },
             sig,
-            is_ignore: if is_signer { 0 } else { 1 },
+            is_ignore: 0,
         });
     }
 
@@ -299,7 +301,12 @@ fn main() -> Result<()> {
         candidates,
     };
     let input_bytes = codec::encode(&input);
-    let zkvm_input: Input = vec![InputItem::Bytes(input_bytes.clone())].into();
+    println!("Encoded input size: {} bytes (limit is 8192)", input_bytes.len());
+    let zkvm_input = match backend {
+        Backend::Risc0 => Input::new().with_prefixed_stdin(input_bytes),
+        Backend::Zisk => Input::new().with_stdin(input_bytes.clone()),
+        _ => Input::new().with_stdin(input_bytes),
+    };
 
     println!("workspace_root = {}", workspace_root.display());
     println!("guest_dir      = {}", guest_dir.display());
@@ -308,7 +315,7 @@ fn main() -> Result<()> {
         Backend::SP1 => {
             let compiler = Sp1Compiler;
             let program = compiler.compile(&guest_dir)?;
-            let zkvm = EreSP1::new(program, ProverResourceType::Cpu);
+            let zkvm = EreSP1::new(program, ProverResourceType::Gpu)?;
             run_on_vm("sp1", zkvm, &zkvm_input)?;
         }
         Backend::Risc0 => {
@@ -322,12 +329,14 @@ fn main() -> Result<()> {
             let program = compiler.compile(&guest_dir)?;
             let zkvm = EreZisk::new(program, ProverResourceType::Gpu)?;
             run_on_vm("zisk", zkvm, &zkvm_input)?;
-        } // Backend::Pico => {
-          //     let compiler = PicoCompiler;
-          //     let program = compiler.compile(&guest_dir)?;
-          //     let zkvm = ErePico::new(program, ProverResourceType::Cpu);
-          //     run_on_vm("pico", zkvm, &zkvm_input)?;
-          // }
+        }
+        #[cfg(feature = "pico")]
+        Backend::Pico => {
+            let compiler = PicoCompiler;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = ErePico::new(program, ProverResourceType::Cpu)?;
+            run_on_vm("pico", zkvm, &zkvm_input)?;
+        }
     }
 
     Ok(())

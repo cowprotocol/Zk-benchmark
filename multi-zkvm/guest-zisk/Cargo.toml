@@ -7,6 +7,5 @@ edition = "2021"
 guest  = { path = "../guest" }
 common = { path = "../common" }
 ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
-
 k256 = {version = "0.13.3", default-features = false, features = ["schnorr"] }
 tiny-keccak = { version = "2.0.2", default-features = false, features = ["keccak"] }

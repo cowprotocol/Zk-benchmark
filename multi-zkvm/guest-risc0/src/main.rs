@@ -34,8 +34,15 @@ fn schnorr_risc0(msg: &Byte32, ax: &Byte32, _ay: &Byte32, sig: &SchnorrSig) -> b
 
 fn main() {
     set_platform_hooks(
-        || -> Vec<u8> { env::read::<Vec<u8>>() },
-        |bytes: &[u8]| env::commit_slice(bytes),
+        || {
+            let mut len_bytes = [0u8; 4];
+            env::read_slice(&mut len_bytes);
+            let len = u32::from_le_bytes(len_bytes) as usize;
+            let mut buf = vec![0u8; len];
+            env::read_slice(&mut buf);
+            buf
+        },
+        |bytes| env::commit_slice(bytes),
     );
     crypto::set_crypto(keccak2, schnorr_risc0);
     run_guest();

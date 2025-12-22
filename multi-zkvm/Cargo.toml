@@ -4,14 +4,18 @@ resolver = "2"
 exclude = ["guest-sp1", "guest-risc0", "guest-zisk", "guest-pico"]
 
 [workspace.dependencies]
-ere-zkvm-interface = { git = "https://github.com/eth-act/ere.git", tag="v0.0.13"}
-ere-dockerized = { git = "https://github.com/eth-act/ere.git"}
-ere-sp1        =  { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
-ere-risc0        = {git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
-# ere-pico        = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
-ere-zisk        = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.13"}
+ere-zkvm-interface = { git = "https://github.com/eth-act/ere.git", rev = "46672d08b72f149c3e939758ed1d69efaf1d0430" }
+ere-dockerized = { git = "https://github.com/eth-act/ere.git", rev = "46672d08b72f149c3e939758ed1d69efaf1d0430" }
+ere-sp1        =  { git = "https://github.com/eth-act/ere.git", rev = "46672d08b72f149c3e939758ed1d69efaf1d0430" }
+ere-risc0        = {git = "https://github.com/eth-act/ere.git", rev = "46672d08b72f149c3e939758ed1d69efaf1d0430" }
+ere-pico        = { git = "https://github.com/eth-act/ere.git", rev = "46672d08b72f149c3e939758ed1d69efaf1d0430" }
+ere-zisk        = { git = "https://github.com/eth-act/ere.git", rev = "46672d08b72f149c3e939758ed1d69efaf1d0430" }
 
 # utils
 anyhow = { version = "1.0.86", default-features = false }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0.117", default-features = false }
+# used by ere: can be bumped here as well
+# serde v1.0.221
+# anyhow v1.0.98
+# serde_json v1.0.142

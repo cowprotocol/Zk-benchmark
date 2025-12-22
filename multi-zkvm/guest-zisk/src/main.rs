@@ -9,6 +9,7 @@ use guest::{crypto, run_guest, set_platform_hooks};
 use k256::schnorr::{signature::Verifier, Signature, VerifyingKey};
 use tiny_keccak::{Hasher, Keccak};
 use ziskos::{read_input, set_output};
+use alloc::format;
 
 #[inline]
 fn keccak2(a: &Byte32, b: &Byte32) -> Byte32 {
@@ -19,6 +20,15 @@ fn keccak2(a: &Byte32, b: &Byte32) -> Byte32 {
     k.finalize(&mut out);
     out
 }
+
+// NOTE: The problem with zisk:
+// The SDK’s stdin cap of 0x2000 bytes (~8 KB) makes it impractical to verify 64 signatures (8328 bytes).
+// Even when tried with 40 signatures, the server crashed with the error:
+// thread '<unnamed>' (1371833) panicked at /Users/runner/work/zisk/zisk/core/src/mem.rs:352:13:
+// Mem::read() section not found for addr: 84=54 with width: 8
+// thread '<unnamed>' panicked at /Users/archit/Zk-benchmark/multi-zkvm/guest/src/lib.rs:37:37:
+// bincode decode failed: UnexpectedEnd { additional: 1 }
+
 
 // this doesn't use the k256 patched version (0.14.0-pre.8) for zisk as
 // the version uses elliptic-curve = { version = "0.14.0-rc.7"} which results in errors while building.
@@ -52,24 +62,22 @@ fn schnorr_zisk(msg: &Byte32, ax: &Byte32, _ay: &Byte32, sig: &SchnorrSig) -> bo
 
 fn write_public_bytes(bytes: &[u8]) {
     let mut buf = [0u8; 4];
-
     for (i, chunk) in bytes.chunks(4).enumerate() {
         buf.fill(0);
         buf[..chunk.len()].copy_from_slice(chunk);
-
-        let val: u32 = ((buf[0] as u32) << 24)
-            | ((buf[1] as u32) << 16)
-            | ((buf[2] as u32) << 8)
-            | (buf[3] as u32);
-
-        set_output(i, val);
+        let val = u32::from_le_bytes(buf);
+        ziskos::set_output(i, val);
     }
 }
 
+
 pub fn main() {
-    set_platform_hooks(|| read_input(), |bytes| write_public_bytes(bytes));
+     set_platform_hooks(
+        || read_input(),
+        |bytes| write_public_bytes(bytes),
+    );
 
     crypto::set_crypto(keccak2, schnorr_zisk);
-
+    
     run_guest();
 }
