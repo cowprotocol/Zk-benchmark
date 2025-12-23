@@ -308,7 +308,6 @@ fn main() -> Result<()> {
         candidates,
     };
     let input_bytes = codec::encode(&input);
-    println!("Encoded input size: {} bytes (limit is 8192)", input_bytes.len());
     let zkvm_input = match backend {
         Backend::Risc0 => Input::new().with_prefixed_stdin(input_bytes),
         Backend::Zisk => Input::new().with_stdin(input_bytes.clone()),

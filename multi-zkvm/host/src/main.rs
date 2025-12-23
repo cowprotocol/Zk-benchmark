@@ -268,7 +268,6 @@ fn main() -> Result<()> {
         message,
         candidates,
     };
-    // Use length-prefixed stdin so guests using Platform::read_whole_input (e.g., Zisk) can decode it.
     let zkvm_input: Input = Input::new().with_prefixed_stdin(codec::encode(&input));
 
     let compiler = DockerizedCompiler::new(vm, compiler_kind, &workspace_root)?;
@@ -288,7 +287,6 @@ fn main() -> Result<()> {
     let proof_kind = match vm {
         zkVMKind::Pico => ProofKind::Compressed,
         zkVMKind::Zisk => ProofKind::Compressed,
-        zkVMKind::Jolt => ProofKind::Compressed,
         _ => ProofKind::Groth16,
     };
 
