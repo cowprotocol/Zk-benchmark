@@ -25,7 +25,7 @@ cargo run -p host-native -- \
 use +nightly-2025-08-04 for pico
 
 ```
-RUST_LOG=info cargo +nightly-2025-08-04 run -p host-native --features pico -- \
+RUST_LOG=info cargo +nightly-2025-08-04 run -p host-native --no-default-features --features pico -- \
   --zkvm pico \
   --msg "hello world" \
   --signers "$(seq -s ',' 0 47)"
