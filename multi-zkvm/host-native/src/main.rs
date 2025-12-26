@@ -3,7 +3,10 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use common::{codec, Byte32, Candidate, GuestInput, PubKey, SchnorrSig};
-use ere_zkvm_interface::{zkVM, Compiler, Input, InputItem, ProofKind, ProverResourceType};
+use ere_zkvm_interface::{
+    compiler::Compiler,
+    zkvm::{Input, ProofKind, ProverResourceType, zkVM},
+};
 use k256::ecdsa::{SigningKey as EcdsaSigningKey, VerifyingKey as EcdsaVerifyingKey};
 use k256::{
     schnorr::{signature::Signer as _, Signature, SigningKey},
@@ -15,13 +18,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tiny_keccak::{Hasher, Keccak};
 
-// use ere_pico::{compiler::RustRv32ima as PicoCompiler, ErePico};
-use ere_risc0::{compiler::RustRv32ima as Risc0Compiler, EreRisc0};
-use ere_sp1::{compiler::RustRv32ima as Sp1Compiler, EreSP1};
+use ere_sp1::{compiler::RustRv32imaCustomized as Sp1Compiler, EreSP1};
 use ere_zisk::{compiler::RustRv64imaCustomized as ZiskCompiler, EreZisk};
+use ere_risc0::{compiler::RustRv32imaCustomized as Risc0Compiler, EreRisc0};
+#[cfg(feature = "pico")]
+use ere_pico::{compiler::RustRv32imaCustomized as PicoCompiler, ErePico};
+
+const BENCHMARK_DB_PATH: &str = "../benchmark/benchmark_results.json";
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
 struct Args {
     #[arg(long)]
     msg: String,
@@ -33,17 +38,53 @@ struct Args {
     zkvm: String,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct BenchmarkResult {
+    zkvm: String,
+    num_signers: usize,
+    execution_cycles: u64,
+    execution_duration: f64,
+    proving_duration: f64,
+    timestamp: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct BenchmarkDatabase {
+    results: Vec<BenchmarkResult>,
+}
+
+impl BenchmarkDatabase {
+    fn load_or_create(path: &str) -> Result<Self> {
+        if Path::new(path).exists() {
+            let data = fs::read(path)?;
+            Ok(serde_json::from_slice(&data)?)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    fn save(&self, path: &str) -> Result<()> {
+        fs::write(path, serde_json::to_vec_pretty(self)?)?;
+        Ok(())
+    }
+
+    fn add_result(&mut self, result: BenchmarkResult) {
+        self.results.push(result);
+    }
+}
+
 const GUEST_SP1_DIR: &str = "guest-sp1";
 const GUEST_RISC0_DIR: &str = "guest-risc0";
 const GUEST_ZISK_DIR: &str = "guest-zisk";
-// const GUEST_PICO_DIR: &str = "guest-pico";
-
-#[derive(Clone, Copy, Debug)]
+#[cfg(feature = "pico")]
+const GUEST_PICO_DIR: &str = "guest-pico";
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Backend {
     SP1,
     Risc0,
     Zisk,
-    // Pico,
+    #[cfg(feature = "pico")]
+    Pico,
 }
 
 fn parse_backend(s: &str) -> Backend {
@@ -51,7 +92,8 @@ fn parse_backend(s: &str) -> Backend {
         "sp1" => Backend::SP1,
         "risc0" => Backend::Risc0,
         "zisk" => Backend::Zisk,
-        // "pico" => Backend::Pico,
+        #[cfg(feature = "pico")]
+        "pico" => Backend::Pico,
         other => unreachable!("unknown zkvm: {other}"),
     }
 }
@@ -61,7 +103,8 @@ fn guest_dir_for_backend(cwd: &Path, backend: Backend) -> PathBuf {
         Backend::SP1 => cwd.join(GUEST_SP1_DIR),
         Backend::Risc0 => cwd.join(GUEST_RISC0_DIR),
         Backend::Zisk => cwd.join(GUEST_ZISK_DIR),
-        // Backend::Pico => cwd.join(GUEST_PICO_DIR),
+        #[cfg(feature = "pico")]
+        Backend::Pico => cwd.join(GUEST_PICO_DIR),
     }
 }
 
@@ -185,8 +228,11 @@ fn parse_signer_indices(s: &str) -> Result<Vec<usize>> {
     }
     let mut out = Vec::new();
     for part in s.split(',') {
-        let idx: usize = part
-            .trim()
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let idx: usize = trimmed
             .parse()
             .with_context(|| format!("bad index: {part}"))?;
         anyhow::ensure!(idx < 64, "signer index out of range: {idx}");
@@ -230,11 +276,13 @@ fn message_to_32(msg_arg: &str) -> Result<Byte32> {
     })
 }
 
-fn run_on_vm<V: zkVM>(label: &str, zkvm: V, input: &Input) -> anyhow::Result<()> {
+fn run_on_vm<V: zkVM>(label: &str, zkvm: V, input: &Input) -> anyhow::Result<(u64, f64, f64)> {
     let (public_values_ex, exec_report) = zkvm.execute(input)?;
+    let exec_s = exec_report.execution_duration.as_secs_f64();
+    let cycles = exec_report.total_num_cycles;
     println!(
-        "[{label}] Execute OK. Cycles: {} (duration: {:?})",
-        exec_report.total_num_cycles, exec_report.execution_duration
+        "[{label}] Execute OK. Cycles: {} (duration: {:?}s)",
+        cycles, exec_s
     );
     println!("[{label}] Public values (exec): {:?}", public_values_ex);
     println!("[{label}] exec report: {:?}", exec_report);
@@ -245,16 +293,18 @@ fn run_on_vm<V: zkVM>(label: &str, zkvm: V, input: &Input) -> anyhow::Result<()>
     };
 
     let (public_values_pr, proof, proving_report) = zkvm.prove(input, proof_kind)?;
-    println!("[{label}] Proved in {:?}", proving_report.proving_time);
+    let prove_s = proving_report.proving_time.as_secs_f64();
+    println!("[{label}] Proved in {:?}s", prove_s);
     println!("[{label}] Public values (prove): {:?}", public_values_pr);
     println!("[{label}] proving report: {:?}", proving_report);
     println!("[{label}] proof: {:?}", proof);
 
-    Ok(())
+    Ok((cycles, exec_s, prove_s))
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let mut bench_db = BenchmarkDatabase::load_or_create(BENCHMARK_DB_PATH)?;
 
     let backend = parse_backend(&args.zkvm);
     let workspace_root = std::env::current_dir()?.canonicalize()?;
@@ -273,7 +323,9 @@ fn main() -> Result<()> {
     let signer_idxs = parse_signer_indices(&args.signers)?;
     println!("Signers = {:?}", signer_idxs);
 
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(32);
+    let num_signers = signer_idxs.len();
+
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(64);
     for (i, dk) in keyset.keys.iter().enumerate() {
         let is_signer = signer_idxs.binary_search(&i).is_ok();
         let sig = if is_signer {
@@ -299,36 +351,56 @@ fn main() -> Result<()> {
         candidates,
     };
     let input_bytes = codec::encode(&input);
-    let zkvm_input: Input = vec![InputItem::Bytes(input_bytes.clone())].into();
+    let zkvm_input = match backend {
+        Backend::Risc0 => Input::new().with_prefixed_stdin(input_bytes),
+        Backend::Zisk => Input::new().with_stdin(input_bytes.clone()),
+        _ => Input::new().with_stdin(input_bytes),
+    };
 
     println!("workspace_root = {}", workspace_root.display());
     println!("guest_dir      = {}", guest_dir.display());
 
-    match backend {
+    let (cycles, exec_s, prove_s) = match backend {
         Backend::SP1 => {
             let compiler = Sp1Compiler;
             let program = compiler.compile(&guest_dir)?;
-            let zkvm = EreSP1::new(program, ProverResourceType::Cpu);
-            run_on_vm("sp1", zkvm, &zkvm_input)?;
+            let zkvm = EreSP1::new(program, ProverResourceType::Gpu)?;
+            run_on_vm("sp1", zkvm, &zkvm_input)?
         }
         Backend::Risc0 => {
             let compiler = Risc0Compiler;
             let program = compiler.compile(&guest_dir)?;
             let zkvm = EreRisc0::new(program, ProverResourceType::Gpu)?;
-            run_on_vm("risc0", zkvm, &zkvm_input)?;
+            run_on_vm("risc0", zkvm, &zkvm_input)?
         }
         Backend::Zisk => {
             let compiler = ZiskCompiler;
             let program = compiler.compile(&guest_dir)?;
             let zkvm = EreZisk::new(program, ProverResourceType::Gpu)?;
-            run_on_vm("zisk", zkvm, &zkvm_input)?;
-        } // Backend::Pico => {
-          //     let compiler = PicoCompiler;
-          //     let program = compiler.compile(&guest_dir)?;
-          //     let zkvm = ErePico::new(program, ProverResourceType::Cpu);
-          //     run_on_vm("pico", zkvm, &zkvm_input)?;
-          // }
-    }
+            run_on_vm("zisk", zkvm, &zkvm_input)?
+        }
+        #[cfg(feature = "pico")]
+        Backend::Pico => {
+            let compiler = PicoCompiler;
+            let program = compiler.compile(&guest_dir)?;
+            let zkvm = ErePico::new(program, ProverResourceType::Cpu)?;
+            run_on_vm("pico", zkvm, &zkvm_input)?
+        }
+    };
+
+    let result = BenchmarkResult {
+        zkvm: args.zkvm.clone(),
+        num_signers,
+        execution_cycles: cycles,
+        execution_duration: exec_s,
+        proving_duration: prove_s,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    
+    bench_db.add_result(result);
+    bench_db.save(BENCHMARK_DB_PATH)?;
+
+    println!("Benchmark result saved to {}", BENCHMARK_DB_PATH);
 
     Ok(())
 }

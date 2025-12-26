@@ -1,0 +1,100 @@
+{
+    "results": [
+        {
+            "zkvm": "sp1",
+            "num_signers": 12,
+            "execution_cycles": 1175639,
+            "execution_duration": 17.606109889,
+            "proving_duration": 51.192820205,
+            "timestamp": "2025-01-02T10:32:15Z"
+        },
+        {
+            "zkvm": "sp1",
+            "num_signers": 48,
+            "execution_cycles": 3540527,
+            "execution_duration": 68.727078032,
+            "proving_duration": 54.092684351,
+            "timestamp": "2025-01-02T10:35:42Z"
+        },
+        {
+            "zkvm": "sp1",
+            "num_signers": 64,
+            "execution_cycles": 4590196,
+            "execution_duration": 91.724881664,
+            "proving_duration": 54.713744762,
+            "timestamp": "2025-01-02T10:38:28Z"
+        },
+        {
+            "zkvm": "risc0",
+            "num_signers": 12,
+            "execution_cycles": 4246362,
+            "execution_duration": 0.277822494,
+            "proving_duration": 8.836412406,
+            "timestamp": "2025-01-02T10:41:55Z"
+        },
+        {
+            "zkvm": "risc0",
+            "num_signers": 48,
+            "execution_cycles": 15432284,
+            "execution_duration": 0.698450008,
+            "proving_duration": 22.740507773,
+            "timestamp": "2025-01-02T10:44:18Z"
+        },
+        {
+            "zkvm": "risc0",
+            "num_signers": 64,
+            "execution_cycles": 20403567,
+            "execution_duration": 0.89345657,
+            "proving_duration": 28.274220318,
+            "timestamp": "2025-01-02T10:47:03Z"
+        },
+        {
+            "zkvm": "zisk",
+            "num_signers": 12,
+            "execution_cycles": 24137543,
+            "execution_duration": 1.949894904,
+            "proving_duration": 8.928620327,
+            "timestamp": "2025-01-02T10:50:27Z"
+        },
+        {
+            "zkvm": "zisk",
+            "num_signers": 48,
+            "execution_cycles": 92146138,
+            "execution_duration": 4.907298156,
+            "proving_duration": 23.749729754,
+            "timestamp": "2025-01-02T10:53:09Z"
+        },
+        {
+            "zkvm": "zisk",
+            "num_signers": 64,
+            "execution_cycles": 123547530,
+            "execution_duration": 6.224315474,
+            "proving_duration": 31.284240506,
+            "timestamp": "2025-01-02T10:56:34Z"
+        },
+        {
+            "zkvm": "pico",
+            "num_signers": 12,
+            "execution_cycles": 68369452,
+            "execution_duration": 140.445597468,
+            "proving_duration": 0.0,
+            "timestamp": "2025-01-02T10:59:51Z"
+        },
+        {
+            "zkvm": "pico",
+            "num_signers": 48,
+            "execution_cycles": 272319154,
+            "execution_duration": 227.386748057,
+            "proving_duration": 0.0,
+            "timestamp": "2025-01-02T11:06:51Z"
+        },
+        {
+            "zkvm": "pico",
+            "num_signers": 64,
+            "execution_cycles": 362963466,
+            "execution_duration": 379.711714483,
+            "proving_duration": 0.0,
+            "timestamp": "2025-01-02T11:21:51Z"
+        }
+    ]
+}

@@ -13,11 +13,20 @@ cargo run -p host -- \
 
 For running in a RTX 4090/GPU instance
 
-use +nightly only for pico
+You first need to install the toolchain for specified zkVM which can be done by cloning ere and `cd ere && bash scripts/sdk_installers/install_{zkvm_name}_sdk.sh`
 
 ```
 cargo run -p host-native -- \
   --zkvm sp1 \
+  --msg "hello world" \
+  --signers "$(seq -s ',' 0 47)"
+```
+
+use +nightly-2025-08-04 for pico
+
+```
+RUST_LOG=info cargo +nightly-2025-08-04 run -p host-native --no-default-features --features pico -- \
+  --zkvm pico \
   --msg "hello world" \
   --signers "$(seq -s ',' 0 47)"
 ```
