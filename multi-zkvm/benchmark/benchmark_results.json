@@ -74,11 +74,27 @@
         },
         {
             "zkvm": "pico",
+            "num_signers": 12,
+            "execution_cycles": 68369452,
+            "execution_duration": 140.445597468,
+            "proving_duration": 0.0,
+            "timestamp": "2025-01-02T10:59:51Z"
+        },
+        {
+            "zkvm": "pico",
             "num_signers": 48,
             "execution_cycles": 272319154,
             "execution_duration": 227.386748057,
             "proving_duration": 0.0,
-            "timestamp": "2025-01-02T10:59:51Z"
+            "timestamp": "2025-01-02T11:06:51Z"
+        },
+        {
+            "zkvm": "pico",
+            "num_signers": 64,
+            "execution_cycles": 362963466,
+            "execution_duration": 379.711714483,
+            "proving_duration": 0.0,
+            "timestamp": "2025-01-02T11:21:51Z"
         }
     ]
 }
