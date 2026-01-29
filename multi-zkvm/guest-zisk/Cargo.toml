@@ -6,6 +6,10 @@ edition = "2021"
 [dependencies]
 guest  = { path = "../guest" }
 common = { path = "../common" }
-ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
-k256 = {version = "0.13.3", default-features = false, features = ["schnorr"] }
-tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak.git", branch = "zisk", features = [ "keccak" ] }
+ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.15.0" }
+k256 = {version = "0.13.4", default-features = false, features = ["schnorr"] }
+tiny-keccak = { version = "=2.0.2", default-features = false, features = ["keccak"] }
+
+[patch.crates-io]
+tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak.git", tag = "patch-2.0.2-zisk-0.15.0" }
+k256 = { git = "https://github.com/0xPolygonHermez/zisk-patch-elliptic-curves.git", tag = "patch-k256-0.13.4-zisk-0.15.0" }
