@@ -4,12 +4,12 @@ resolver = "2"
 exclude = ["guest-sp1", "guest-risc0", "guest-zisk", "guest-pico"]
 
 [workspace.dependencies]
-ere-zkvm-interface = { git = "https://github.com/eth-act/ere.git", tag = "v0.1.6" }
-ere-dockerized = { git = "https://github.com/eth-act/ere.git",   tag = "v0.1.6" }
-ere-sp1        =  { git = "https://github.com/eth-act/ere.git",  tag = "v0.1.6" }
-ere-risc0        = {git = "https://github.com/eth-act/ere.git",  tag = "v0.1.6" }
-ere-pico        = { git = "https://github.com/eth-act/ere.git",  tag = "v0.1.6" }
-ere-zisk        = { git = "https://github.com/eth-act/ere.git",  tag = "v0.1.6" }
+ere-zkvm-interface = { git = "https://github.com/eth-act/ere.git", tag = "v0.0.16" }
+ere-dockerized = { git = "https://github.com/eth-act/ere.git",   tag = "v0.0.16" }
+ere-sp1        =  { git = "https://github.com/eth-act/ere.git",  tag = "v0.0.16" }
+ere-risc0        = {git = "https://github.com/eth-act/ere.git",  tag = "v0.0.16" }
+ere-pico        = { git = "https://github.com/eth-act/ere.git",  tag = "v0.0.16" }
+ere-zisk        = { git = "https://github.com/eth-act/ere.git",  tag = "v0.0.16" }
 
 # utils
 anyhow = { version = "1.0.98", default-features = false }
