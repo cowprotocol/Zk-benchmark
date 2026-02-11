@@ -7,11 +7,11 @@ use ziskos::{read_input, set_output};
 use serde_big_array::BigArray;
 
 const ONE_E18: u128 = 1_000_000_000_000_000_000u128;
-const MAX_SOLUTIONS: usize = 300;
-const MAX_TRADES_PER_SOLUTION: usize = 150;
-const MAX_WINNERS: usize = 150;
-const MAX_PAIRS_PER_SOLUTION: usize = 30;
-const MAX_TREE_DEPTH: u8 = 9;
+const MAX_SOLUTIONS: usize = 200;
+const MAX_TRADES_PER_SOLUTION: usize = 100;
+const MAX_WINNERS: usize = 100;
+const MAX_PAIRS_PER_SOLUTION: usize = 10;
+const MAX_TREE_DEPTH: u8 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Address20(pub [u8; 20]);
