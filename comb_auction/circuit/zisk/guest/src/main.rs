@@ -2,36 +2,34 @@
 ziskos::entrypoint!(main);
 
 use tiny_keccak::{Hasher, Keccak};
-use serde::{Deserialize, Serialize};
 use ziskos::{read_input, set_output};
-use serde_big_array::BigArray;
 
 const ONE_E18: u128 = 1_000_000_000_000_000_000u128;
-const MAX_SOLUTIONS: usize = 200;
+const MAX_SOLUTIONS: usize = 100;
 const MAX_TRADES_PER_SOLUTION: usize = 100;
-const MAX_WINNERS: usize = 100;
-const MAX_PAIRS_PER_SOLUTION: usize = 10;
-const MAX_TREE_DEPTH: u8 = 8;
+const MAX_WINNERS: usize = 60;
+const MAX_PAIRS_PER_SOLUTION: usize = 20;
+const MAX_TREE_DEPTH: u8 = 7;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Address20(pub [u8; 20]);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DirectedPair {
     pub sell: Address20,
     pub buy: Address20,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub enum Side {
     Sell = 0,
     Buy = 1,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct OrderUid(#[serde(with = "BigArray")] pub [u8; 56]);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct OrderUid(pub [u8; 56]);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct TradeIn {
     pub order_uid: OrderUid, // canonical sort key if needed
     pub sell_token: Address20,
@@ -49,7 +47,7 @@ pub struct TradeIn {
     pub native_price_buy: u128,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct SolutionIn {
     pub solver: Address20,
     pub solution_id: u64,
@@ -60,12 +58,157 @@ pub struct SolutionIn {
     pub trades: Vec<TradeIn>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct AuctionInput {
     pub auction_id: u64,
-    pub max_winners: usize,
+    pub max_winners: u32,
     pub tree_depth: u8, // Merkle depth for bidset_root tree (power-of-two leaves)
     pub solutions: Vec<SolutionIn>,
+}
+
+#[derive(Clone, Copy)]
+struct Bytes<'a> {
+    b: &'a [u8],
+    i: usize,
+}
+
+impl<'a> Bytes<'a> {
+    #[inline] fn new(b: &'a [u8]) -> Self { Self { b, i: 0 } }
+
+    #[inline] fn take(&mut self, n: usize) -> &'a [u8] {
+        let j = self.i + n;
+        if j > self.b.len() { self.fail(9001); }
+        let out = &self.b[self.i..j];
+        self.i = j;
+        out
+    }
+
+    #[inline] fn u8(&mut self) -> u8 { self.take(1)[0] }
+
+    #[inline] fn u32_be(&mut self) -> u32 {
+        let s = self.take(4);
+        u32::from_be_bytes([s[0], s[1], s[2], s[3]])
+    }
+
+    #[inline] fn u64_be(&mut self) -> u64 {
+        let s = self.take(8);
+        u64::from_be_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]])
+    }
+
+    #[inline] fn u128_be(&mut self) -> u128 {
+        let s = self.take(16);
+        u128::from_be_bytes([
+            s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7],
+            s[8], s[9], s[10], s[11], s[12], s[13], s[14], s[15],
+        ])
+    }
+
+    #[inline] fn addr20(&mut self) -> Address20 {
+        let s = self.take(20);
+        let mut a = [0u8; 20];
+        a.copy_from_slice(s);
+        Address20(a)
+    }
+
+    #[inline] fn uid56(&mut self) -> [u8; 56] {
+        let s = self.take(56);
+        let mut a = [0u8; 56];
+        a.copy_from_slice(s);
+        a
+    }
+
+    #[inline(never)]
+    fn fail(&self, code: u32) -> ! {
+        set_output(0, code);
+        loop {}
+    }
+}
+
+fn decode_input(bytes: &[u8]) -> AuctionInput {
+    let mut r = Bytes::new(bytes);
+
+    let auction_id = r.u64_be();
+    let max_winners = r.u32_be();
+    let tree_depth = r.u8();
+    let num_solutions = r.u32_be() as usize;
+
+    if num_solutions > MAX_SOLUTIONS {
+        r.fail(100);
+    }
+    if (max_winners as usize) > MAX_WINNERS {
+        r.fail(101);
+    }
+    if tree_depth > MAX_TREE_DEPTH {
+        r.fail(102);
+    }
+
+    let mut solutions: Vec<SolutionIn> = Vec::with_capacity(num_solutions);
+
+    for _ in 0..num_solutions {
+        let solver = r.addr20();
+        let solution_id = r.u64_be();
+
+        let num_prices = r.u32_be() as usize;
+        let mut prices: Vec<(Address20, u128)> = Vec::with_capacity(num_prices);
+        for _ in 0..num_prices {
+            let tok = r.addr20();
+            let price = r.u128_be();
+            prices.push((tok, price));
+        }
+
+        let num_trades = r.u32_be() as usize;
+        if num_trades > MAX_TRADES_PER_SOLUTION {
+            r.fail(103);
+        }
+
+        let mut trades: Vec<TradeIn> = Vec::with_capacity(num_trades);
+        for _ in 0..num_trades {
+            let uid = OrderUid(r.uid56());
+            let sell = r.addr20();
+            let buy = r.addr20();
+
+            let limit_sell = r.u128_be();
+            let limit_buy = r.u128_be();
+
+            let executed_sell = r.u128_be();
+            let executed_buy = r.u128_be();
+
+            let side_u = r.u8();
+            let side = match side_u {
+                0 => Side::Sell,
+                1 => Side::Buy,
+                _ => r.fail(104),
+            };
+
+            let native_price_buy = r.u128_be();
+
+            trades.push(TradeIn {
+                order_uid: uid,
+                sell_token: sell,
+                buy_token: buy,
+                limit_sell,
+                limit_buy,
+                executed_sell,
+                executed_buy,
+                side,
+                native_price_buy,
+            });
+        }
+
+        solutions.push(SolutionIn {
+            solver,
+            solution_id,
+            prices,
+            trades,
+        });
+    }
+
+    AuctionInput {
+        auction_id,
+        max_winners,
+        tree_depth,
+        solutions,
+    }
 }
 
 fn keccak256(parts: &[&[u8]]) -> [u8; 32] {
@@ -78,6 +221,30 @@ fn keccak256(parts: &[&[u8]]) -> [u8; 32] {
     out
 }
 
+fn keccak256_stream<F: FnOnce(&mut Keccak)>(f: F) -> [u8; 32] {
+    let mut k = Keccak::v256();
+    f(&mut k);
+    let mut out = [0u8; 32];
+    k.finalize(&mut out);
+    out
+}
+
+#[inline]
+fn is_sorted_by_addr(prices: &[(Address20, u128)]) -> bool {
+    for i in 1..prices.len() {
+        if prices[i - 1].0 .0 > prices[i].0 .0 { return false; }
+    }
+    true
+}
+
+#[inline]
+fn is_sorted_by_uid(trades: &[TradeIn]) -> bool {
+    for i in 1..trades.len() {
+        if trades[i - 1].order_uid.0 > trades[i].order_uid.0 { return false; }
+    }
+    true
+}
+
 fn u64_be(x: u64) -> [u8; 8] {
     x.to_be_bytes()
 }
@@ -86,53 +253,46 @@ fn u128_be(x: u128) -> [u8; 16] {
     x.to_be_bytes()
 }
 
-fn prices_hash(prices: &[(Address20, u128)]) -> [u8; 32] {
-    let mut v = prices.to_vec();
-    v.sort_by(|(a1, _), (a2, _)| a1.0.cmp(&a2.0));
-
-    let mut buf = Vec::with_capacity(v.len() * (20 + 16));
-    for (tok, price) in v {
-        buf.extend_from_slice(&tok.0);
-        buf.extend_from_slice(&u128_be(price));
-    }
-    keccak256(&[buf.as_slice()])
-}
-
-fn trades_hash(trades: &[TradeIn]) -> [u8; 32] {
-    let mut v = trades.to_vec();
-   v.sort_by(|t1, t2| t1.order_uid.0.cmp(&t2.order_uid.0));
-
-    let mut buf = Vec::new();
-    for t in v {
-        buf.extend_from_slice(&t.order_uid.0);
-        buf.extend_from_slice(&t.sell_token.0);
-        buf.extend_from_slice(&t.buy_token.0);
-        buf.extend_from_slice(&u128_be(t.limit_sell));
-        buf.extend_from_slice(&u128_be(t.limit_buy));
-        buf.extend_from_slice(&u128_be(t.executed_sell));
-        buf.extend_from_slice(&u128_be(t.executed_buy));
-        buf.push(t.side as u8);
-        buf.extend_from_slice(&u128_be(t.native_price_buy));
-    }
-    keccak256(&[buf.as_slice()])
-}
-
 // Leaf commit binding solution payload (for bidset_root):
 // leaf = H("SOL"|solver|solution_id|prices_hash|trades_hash)
 fn solution_leaf_commit(sol: &SolutionIn) -> [u8; 32] {
-    let tag = b"SOL";
-    let solver = sol.solver.0;
-    let sid = u64_be(sol.solution_id);
-    let ph = prices_hash(&sol.prices);
-    let th = trades_hash(&sol.trades);
+    // single Keccak over the full canonical encoding.
+    if !is_sorted_by_addr(&sol.prices) {
+        panic!("prices not sorted");
+    }
+    if !is_sorted_by_uid(&sol.trades) {
+        panic!("trades not sorted");
+    }
 
-    keccak256(&[
-        tag,
-        solver.as_slice(),
-        sid.as_slice(),
-        ph.as_slice(),
-        th.as_slice(),
-    ])
+    keccak256_stream(|k| {
+        // header
+        k.update(b"SOL");
+        k.update(&sol.solver.0);
+        k.update(&u64_be(sol.solution_id));
+
+        // prices (length + items)
+        let n_prices = sol.prices.len() as u32;
+        k.update(&n_prices.to_be_bytes());
+        for (tok, price) in &sol.prices {
+            k.update(&tok.0);
+            k.update(&u128_be(*price));
+        }
+
+        // trades (length + items)
+        let n_trades = sol.trades.len() as u32;
+        k.update(&n_trades.to_be_bytes());
+        for t in &sol.trades {
+            k.update(&t.order_uid.0);
+            k.update(&t.sell_token.0);
+            k.update(&t.buy_token.0);
+            k.update(&u128_be(t.limit_sell));
+            k.update(&u128_be(t.limit_buy));
+            k.update(&u128_be(t.executed_sell));
+            k.update(&u128_be(t.executed_buy));
+            k.update(&[t.side as u8]);
+            k.update(&u128_be(t.native_price_buy));
+        }
+    })
 }
 
 fn merkle_root(leaves: Vec<[u8; 32]>, depth: usize) -> [u8; 32] {
@@ -146,7 +306,7 @@ fn merkle_root(leaves: Vec<[u8; 32]>, depth: usize) -> [u8; 32] {
             let h = keccak256(&[cur[i].as_slice(), cur[i + 1].as_slice()]);
             next.push(h);
         }
-        std::mem::swap(&mut cur, &mut next);
+        core::mem::swap(&mut cur, &mut next);
     }
 
     cur[0]
@@ -166,7 +326,7 @@ fn ceil_div(a: u128, b: u128) -> u128 {
 }
 
 fn floor_mul_div(a: u128, mul: u128, div: u128) -> u128 {
-    // floor(a*mul/div), assumes div>0 and fits u128 under your chosen bounds
+    // floor(a*mul/div), assumes div>0 and fits u128 under chosen bounds
     a.saturating_mul(mul) / div
 }
 
@@ -230,8 +390,8 @@ fn find_pair_idx(pairs: &[(DirectedPair, u128)], key: DirectedPair) -> Option<us
     None
 }
 
-fn score_solution(sol: &SolutionIn) -> ScoredSolution {
-   let mut pairs_scores: Vec<(DirectedPair, u128)> = Vec::with_capacity(8.min(MAX_PAIRS_PER_SOLUTION));
+fn score_solution(sol: &SolutionIn, sol_commit: [u8; 32]) -> ScoredSolution {
+    let mut pairs_scores: Vec<(DirectedPair, u128)> = Vec::with_capacity(MAX_PAIRS_PER_SOLUTION);
     let mut total = 0u128;
 
     for t in &sol.trades {
@@ -253,7 +413,7 @@ fn score_solution(sol: &SolutionIn) -> ScoredSolution {
     ScoredSolution {
         total_score: total,
         pairs_scores,
-        sol_commit: solution_leaf_commit(sol),
+        sol_commit,
     }
 }
 
@@ -321,39 +481,27 @@ fn used_contains(used: &[(Address20, Address20)], p: (Address20, Address20)) -> 
     false
 }
 
-fn pick_winners_greedy(sorted: &[ScoredSolution], max_winners: usize) -> Vec<ScoredSolution> {
-    let mut winners: Vec<ScoredSolution> = Vec::with_capacity(max_winners.min(MAX_WINNERS));
+fn pick_winners_greedy(sorted: &[ScoredSolution], max_winners: usize) -> Vec<usize> {
+    let mut winners: Vec<usize> = Vec::with_capacity(max_winners.min(MAX_WINNERS));
     let mut used_pairs: Vec<(Address20, Address20)> =
-        Vec::with_capacity(MAX_WINNERS * MAX_PAIRS_PER_SOLUTION); 
+        Vec::with_capacity(MAX_WINNERS * MAX_PAIRS_PER_SOLUTION);
 
-    for s in sorted {
-        if winners.len() >= max_winners {
-            break;
-        }
-        if s.pairs_scores.is_empty() {
-            continue;
-        }
+    for (idx, s) in sorted.iter().enumerate() {
+        if winners.len() >= max_winners { break; }
+        if s.pairs_scores.is_empty() { continue; }
 
-        // check disjointness
         let mut ok = true;
         for (pair, _) in &s.pairs_scores {
             let k = (pair.sell, pair.buy);
-            if used_contains(&used_pairs, k) {
-                ok = false;
-                break;
-            }
+            if used_contains(&used_pairs, k) { ok = false; break; }
         }
-        if !ok {
-            continue;
-        }
+        if !ok { continue; }
 
-        // accept: mark pairs used
         for (pair, _) in &s.pairs_scores {
             used_pairs.push((pair.sell, pair.buy));
         }
-        winners.push(s.clone());
+        winners.push(idx);
     }
-
     winners
 }
 
@@ -368,19 +516,24 @@ fn set_output_u32_be_chunks(start_slot: usize, bytes32: [u8; 32]) {
 
 fn main() {
     let input_bytes = read_input();
-    let inp: AuctionInput = bincode::deserialize(&input_bytes).expect("bad input encoding");
+    let inp: AuctionInput = decode_input(&input_bytes);
 
     if inp.solutions.len() > MAX_SOLUTIONS { panic!("too many solutions"); }
-    if inp.max_winners > MAX_WINNERS { panic!("max_winners too large"); }
+    if (inp.max_winners as usize) > MAX_WINNERS { panic!("max_winners too large"); }
     if inp.tree_depth > MAX_TREE_DEPTH { panic!("tree_depth too large"); }
-     for sol in &inp.solutions {
+    for sol in &inp.solutions {
         if sol.trades.len() > MAX_TRADES_PER_SOLUTION { panic!("too many trades"); }
     }
 
+     // canonical leaf order: sort by solution_commit bytes ascending (so roots don't depend on input order)
+    let mut all_commits: Vec<[u8; 32]> = Vec::with_capacity(inp.solutions.len());
+
     // score all solutions
     let mut scored: Vec<ScoredSolution> = Vec::with_capacity(inp.solutions.len());
-    for sol in &inp.solutions {
-        scored.push(score_solution(sol));
+     for sol in &inp.solutions {
+        let commit = solution_leaf_commit(sol);
+        all_commits.push(commit);
+        scored.push(score_solution(sol, commit));
     }
 
     // baseline filter 
@@ -394,17 +547,11 @@ fn main() {
     });
 
     // greedy pick winners with disjoint directed pairs across solutions
-    let winners = pick_winners_greedy(&scored, inp.max_winners);
+    let winner_idxs = pick_winners_greedy(&scored, inp.max_winners as usize);
 
     // compute bidset_root from all solution commits in this snapshot, using fixed depth
     let depth = inp.tree_depth as usize;
     let leaf_count = 1usize << depth;
-
-    // canonical leaf order: sort by solution_commit bytes ascending (so roots don't depend on input order)
-    let mut all_commits: Vec<[u8; 32]> = Vec::with_capacity(inp.solutions.len());
-    for sol in &inp.solutions {
-        all_commits.push(solution_leaf_commit(sol));
-    }
 
     all_commits.sort();
 
@@ -420,23 +567,20 @@ fn main() {
     let bidset_root = merkle_root(leaves, depth);
 
     // winners_root over winner leave
-    let mut w_leaves: Vec<[u8; 32]> = Vec::with_capacity(winners.len().max(1));
-    for w in &winners {
+    let mut w_leaves: Vec<[u8; 32]> = Vec::with_capacity(winner_idxs.len().max(1));
+    for &i in &winner_idxs {
+        let w = &scored[i];
         w_leaves.push(winner_leaf(w.sol_commit, w.total_score));
     }
 
-    let mut pow2n = 1usize;
-    while pow2n < w_leaves.len().max(1) {
-        pow2n <<= 1;
-    }
-    while w_leaves.len() < pow2n {
-        w_leaves.push([0u8; 32]);
-    }
+    let n = w_leaves.len().max(1);
+    let pow2n = n.next_power_of_two();
+    w_leaves.resize(pow2n, [0u8; 32]);
     let winners_depth = pow2n.trailing_zeros() as usize;
     let winners_root = merkle_root(w_leaves, winners_depth);
 
     // publish outputs
-    set_output(0, winners.len() as u32);
+    set_output(0, winner_idxs.len() as u32);
     set_output_u32_be_chunks(1, winners_root);
     set_output_u32_be_chunks(9, bidset_root);
 }
