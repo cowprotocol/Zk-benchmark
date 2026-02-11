@@ -1,203 +1,442 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
-use ziskos::{read_input, set_output};
 use tiny_keccak::{Hasher, Keccak};
 use serde::{Deserialize, Serialize};
+use ziskos::{read_input, set_output};
+use serde_big_array::BigArray;
 
-#[derive(Clone, Serialize, Deserialize)]
-struct Trade {
-    id: [u8; 32],
-    sell: [u8; 20],
-    buy: [u8; 20],
-    score: u128,
+const ONE_E18: u128 = 1_000_000_000_000_000_000u128;
+const MAX_SOLUTIONS: usize = 300;
+const MAX_TRADES_PER_SOLUTION: usize = 150;
+const MAX_WINNERS: usize = 150;
+const MAX_PAIRS_PER_SOLUTION: usize = 30;
+const MAX_TREE_DEPTH: u8 = 9;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Address20(pub [u8; 20]);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DirectedPair {
+    pub sell: Address20,
+    pub buy: Address20,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct Solution {
-    id: [u8; 32],
-    solver: [u8; 20],
-    score: u128,
-    trades: Vec<Trade>,
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum Side {
+    Sell = 0,
+    Buy = 1,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct Winner {
-    id: [u8; 32],
-    solver: [u8; 20],
-    score: u128,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OrderUid(#[serde(with = "BigArray")] pub [u8; 56]);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TradeIn {
+    pub order_uid: OrderUid, // canonical sort key if needed
+    pub sell_token: Address20,
+    pub buy_token: Address20,
+
+    pub limit_sell: u128,
+    pub limit_buy: u128,
+
+    pub executed_sell: u128,
+    pub executed_buy: u128,
+
+    pub side: Side,
+
+    // native price of buy token, scaled by 1e18 (price_in_native = native_price_buy / 1e18)
+    pub native_price_buy: u128,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct Input {
-    auction_id: u64,
-    solutions: Vec<Solution>,          // already split, already scored
-    provided_winners: Vec<Winner>,     // expected winners (host computes)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SolutionIn {
+    pub solver: Address20,
+    pub solution_id: u64,
+
+    // Uniform Clearing Prices map (optional for winner selection, used for binding)
+    pub prices: Vec<(Address20, u128)>,
+
+    pub trades: Vec<TradeIn>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Pair([u8; 20], [u8; 20]);
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuctionInput {
+    pub auction_id: u64,
+    pub max_winners: usize,
+    pub tree_depth: u8, // Merkle depth for bidset_root tree (power-of-two leaves)
+    pub solutions: Vec<SolutionIn>,
+}
 
-fn aggregate_scores(sol: &Solution) -> Vec<(Pair, u128)> {
-    let mut out: Vec<(Pair, u128)> = Vec::new();
-    for t in &sol.trades {
-        let key = Pair(t.sell, t.buy);
-        let mut found = false;
-        for (k, v) in out.iter_mut() {
-            if *k == key {
-                *v += t.score;
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            out.push((key, t.score));
-        }
+fn keccak256(parts: &[&[u8]]) -> [u8; 32] {
+    let mut k = Keccak::v256();
+    for p in parts {
+        k.update(p);
     }
+    let mut out = [0u8; 32];
+    k.finalize(&mut out);
     out
 }
 
-fn compute_baselines(solutions: &[Solution]) -> Vec<(Pair, u128)> {
-    let mut baselines: Vec<(Pair, u128)> = Vec::new();
-    for sol in solutions {
-        let agg = aggregate_scores(sol);
-        if agg.len() != 1 { continue; }
-        let (pair, score) = agg[0];
-
-        let mut found = false;
-        for (p, best) in baselines.iter_mut() {
-            if *p == pair {
-                if score > *best { *best = score; } // strict >
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            baselines.push((pair, score));
-        }
-    }
-    baselines
+fn u64_be(x: u64) -> [u8; 8] {
+    x.to_be_bytes()
 }
 
-fn lookup_baseline(baselines: &[(Pair, u128)], pair: Pair) -> u128 {
-    for (p, s) in baselines {
-        if *p == pair { return *s; }
+fn u128_be(x: u128) -> [u8; 16] {
+    x.to_be_bytes()
+}
+
+fn prices_hash(prices: &[(Address20, u128)]) -> [u8; 32] {
+    let mut v = prices.to_vec();
+    v.sort_by(|(a1, _), (a2, _)| a1.0.cmp(&a2.0));
+
+    let mut buf = Vec::with_capacity(v.len() * (20 + 16));
+    for (tok, price) in v {
+        buf.extend_from_slice(&tok.0);
+        buf.extend_from_slice(&u128_be(price));
+    }
+    keccak256(&[buf.as_slice()])
+}
+
+fn trades_hash(trades: &[TradeIn]) -> [u8; 32] {
+    let mut v = trades.to_vec();
+   v.sort_by(|t1, t2| t1.order_uid.0.cmp(&t2.order_uid.0));
+
+    let mut buf = Vec::new();
+    for t in v {
+        buf.extend_from_slice(&t.order_uid.0);
+        buf.extend_from_slice(&t.sell_token.0);
+        buf.extend_from_slice(&t.buy_token.0);
+        buf.extend_from_slice(&u128_be(t.limit_sell));
+        buf.extend_from_slice(&u128_be(t.limit_buy));
+        buf.extend_from_slice(&u128_be(t.executed_sell));
+        buf.extend_from_slice(&u128_be(t.executed_buy));
+        buf.push(t.side as u8);
+        buf.extend_from_slice(&u128_be(t.native_price_buy));
+    }
+    keccak256(&[buf.as_slice()])
+}
+
+// Leaf commit binding solution payload (for bidset_root):
+// leaf = H("SOL"|solver|solution_id|prices_hash|trades_hash)
+fn solution_leaf_commit(sol: &SolutionIn) -> [u8; 32] {
+    let tag = b"SOL";
+    let solver = sol.solver.0;
+    let sid = u64_be(sol.solution_id);
+    let ph = prices_hash(&sol.prices);
+    let th = trades_hash(&sol.trades);
+
+    keccak256(&[
+        tag,
+        solver.as_slice(),
+        sid.as_slice(),
+        ph.as_slice(),
+        th.as_slice(),
+    ])
+}
+
+fn merkle_root(leaves: Vec<[u8; 32]>, depth: usize) -> [u8; 32] {
+    // leaves.len() must be exactly 2^depth
+    let mut cur = leaves;
+    let mut next: Vec<[u8; 32]> = Vec::with_capacity(cur.len() / 2);
+
+    for _ in 0..depth {
+        next.clear();
+        for i in (0..cur.len()).step_by(2) {
+            let h = keccak256(&[cur[i].as_slice(), cur[i + 1].as_slice()]);
+            next.push(h);
+        }
+        std::mem::swap(&mut cur, &mut next);
+    }
+
+    cur[0]
+}
+
+// Winner leaf = H("WIN"|solution_leaf_commit|score_u128_be)
+fn winner_leaf(sol_commit: [u8; 32], score: u128) -> [u8; 32] {
+    keccak256(&[b"WIN", sol_commit.as_slice(), u128_be(score).as_slice()])
+}
+
+fn ceil_div(a: u128, b: u128) -> u128 {
+    // assumes b>0
+    if a == 0 {
+        return 0;
+    }
+    (a - 1) / b + 1
+}
+
+fn floor_mul_div(a: u128, mul: u128, div: u128) -> u128 {
+    // floor(a*mul/div), assumes div>0 and fits u128 under your chosen bounds
+    a.saturating_mul(mul) / div
+}
+
+fn ceil_mul_div(a: u128, mul: u128, div: u128) -> u128 {
+    // ceil(a*mul/div), assumes div>0
+    ceil_div(a.saturating_mul(mul), div)
+}
+
+
+fn trade_score(t: &TradeIn) -> u128 {
+    match t.side {
+        Side::Sell => {
+            // partial_limit_buy = ceil(limit_buy * executed_sell / limit_sell)
+            // surplus_buy = executed_buy - partial_limit_buy
+            // score_native = floor(surplus_buy * native_price_buy / 1e18)
+            if t.limit_sell == 0 {
+                return 0;
+            }
+            let partial_limit_buy = ceil_mul_div(t.limit_buy, t.executed_sell, t.limit_sell);
+            if t.executed_buy <= partial_limit_buy {
+                return 0;
+            }
+            let surplus_buy = t.executed_buy - partial_limit_buy;
+            floor_mul_div(surplus_buy, t.native_price_buy, ONE_E18)
+        }
+        Side::Buy => {
+            // partial_limit_sell = floor(limit_sell * executed_buy / limit_buy)
+            // surplus_sell = partial_limit_sell - executed_sell
+            // convert surplus_sell to buy token units via order limit ratio: floor(surplus_sell * limit_buy / limit_sell)
+            // score_native = floor(surplus_buy_equiv * native_price_buy / 1e18)
+            if t.limit_buy == 0 || t.limit_sell == 0 {
+                return 0;
+            }
+            let partial_limit_sell = floor_mul_div(t.limit_sell, t.executed_buy, t.limit_buy);
+            if partial_limit_sell <= t.executed_sell {
+                return 0;
+            }
+            let surplus_sell = partial_limit_sell - t.executed_sell;
+            let surplus_buy_equiv = floor_mul_div(surplus_sell, t.limit_buy, t.limit_sell);
+            floor_mul_div(surplus_buy_equiv, t.native_price_buy, ONE_E18)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ScoredSolution {
+    total_score: u128,
+    // per directed pair aggregated score
+    pairs_scores: Vec<(DirectedPair, u128)>,
+    // cached commit
+    sol_commit: [u8; 32],
+}
+
+#[inline]
+fn find_pair_idx(pairs: &[(DirectedPair, u128)], key: DirectedPair) -> Option<usize> {
+    for (i, (p, _)) in pairs.iter().enumerate() {
+        if *p == key {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn score_solution(sol: &SolutionIn) -> ScoredSolution {
+   let mut pairs_scores: Vec<(DirectedPair, u128)> = Vec::with_capacity(8.min(MAX_PAIRS_PER_SOLUTION));
+    let mut total = 0u128;
+
+    for t in &sol.trades {
+        let sc = trade_score(t);
+        total = total.saturating_add(sc);
+
+        let pair = DirectedPair { sell: t.sell_token, buy: t.buy_token };
+
+        if let Some(i) = find_pair_idx(&pairs_scores, pair) {
+            pairs_scores[i].1 = pairs_scores[i].1.saturating_add(sc);
+        } else {
+            if pairs_scores.len() >= MAX_PAIRS_PER_SOLUTION {
+                panic!("too many directed pairs in one solution");
+            }
+            pairs_scores.push((pair, sc));
+        }
+    }
+
+    ScoredSolution {
+        total_score: total,
+        pairs_scores,
+        sol_commit: solution_leaf_commit(sol),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BaselineEntry {
+    pair: DirectedPair,
+    best_score: u128,
+}
+
+#[inline]
+fn baseline_get(b: &[BaselineEntry], pair: DirectedPair) -> u128 {
+    for e in b {
+        if e.pair == pair {
+            return e.best_score;
+        }
     }
     0
 }
 
-fn baseline_filter(solutions: &[Solution]) -> Vec<bool> {
-    let baselines = compute_baselines(solutions);
-    let mut kept = vec![false; solutions.len()];
+#[inline]
+fn baseline_update(b: &mut Vec<BaselineEntry>, pair: DirectedPair, score: u128) {
+    for e in b.iter_mut() {
+        if e.pair == pair {
+            if score > e.best_score {
+                e.best_score = score;
+            }
+            return;
+        }
+    }
+    b.push(BaselineEntry { pair, best_score: score });
+}
 
-    for (i, sol) in solutions.iter().enumerate() {
-        let agg = aggregate_scores(sol);
-        if agg.len() == 1 {
-            kept[i] = true;
+
+fn baseline_filter(mut solutions: Vec<ScoredSolution>) -> Vec<ScoredSolution> {
+    let mut baseline: Vec<BaselineEntry> = Vec::with_capacity(64);
+
+    for s in &solutions {
+        if s.pairs_scores.len() == 1 {
+            let (pair, score) = s.pairs_scores[0];
+            baseline_update(&mut baseline, pair, score);
+        }
+    }
+    solutions.retain(|s| {
+        if s.pairs_scores.len() == 1 {
+            return true;
+        }
+        for (pair, sc) in &s.pairs_scores {
+            if *sc < baseline_get(&baseline, *pair) {
+                return false;
+            }
+        }
+        true
+    });
+
+    solutions
+}
+
+#[inline]
+fn used_contains(used: &[(Address20, Address20)], p: (Address20, Address20)) -> bool {
+    for u in used {
+        if *u == p {
+            return true;
+        }
+    }
+    false
+}
+
+fn pick_winners_greedy(sorted: &[ScoredSolution], max_winners: usize) -> Vec<ScoredSolution> {
+    let mut winners: Vec<ScoredSolution> = Vec::with_capacity(max_winners.min(MAX_WINNERS));
+    let mut used_pairs: Vec<(Address20, Address20)> =
+        Vec::with_capacity(MAX_WINNERS * MAX_PAIRS_PER_SOLUTION); 
+
+    for s in sorted {
+        if winners.len() >= max_winners {
+            break;
+        }
+        if s.pairs_scores.is_empty() {
             continue;
         }
+
+        // check disjointness
         let mut ok = true;
-        for (pair, score) in agg {
-            if score < lookup_baseline(&baselines, pair) {
+        for (pair, _) in &s.pairs_scores {
+            let k = (pair.sell, pair.buy);
+            if used_contains(&used_pairs, k) {
                 ok = false;
                 break;
             }
         }
-        kept[i] = ok;
-    }
-    kept
-}
-
-fn directed_pairs_unique(sol: &Solution) -> Vec<Pair> {
-    let mut pairs: Vec<Pair> = Vec::new();
-    for t in &sol.trades {
-        let p = Pair(t.sell, t.buy);
-        if !pairs.contains(&p) {
-            pairs.push(p);
-        }
-    }
-    pairs
-}
-
-// stable descending sort 
-fn select_winners(solutions: &[Solution], kept: &[bool]) -> Vec<Winner> {
-    let mut idx: Vec<usize> = (0..solutions.len()).collect();
-    idx.sort_by(|&a, &b| {
-        let sa = solutions[a].score;
-        let sb = solutions[b].score;
-        if sa != sb { sb.cmp(&sa) } else { a.cmp(&b) }
-    });
-
-    let mut used: Vec<Pair> = Vec::new();
-    let mut winners: Vec<Winner> = Vec::new();
-
-    for i in idx {
-        if !kept[i] { continue; }
-        let pairs = directed_pairs_unique(&solutions[i]);
-
-        let mut conflict = false;
-        'outer: for p in &pairs {
-            for u in &used {
-                if p == u { conflict = true; break 'outer; }
-            }
+        if !ok {
+            continue;
         }
 
-        if !conflict {
-            winners.push(Winner {
-                id: solutions[i].id,
-                solver: solutions[i].solver,
-                score: solutions[i].score,
-            });
-            for p in pairs { used.push(p); }
+        // accept: mark pairs used
+        for (pair, _) in &s.pairs_scores {
+            used_pairs.push((pair.sell, pair.buy));
         }
+        winners.push(s.clone());
     }
 
     winners
 }
 
-// commitment to winners (order-sensitive)
-fn winners_root(winners: &[Winner]) -> [u8; 32] {
-    let mut h = Keccak::v256();;
-    for w in winners {
-        h.update(w.id);
-        h.update(w.solver);
-        // score as big-endian 16 bytes (u128)
-        h.update(w.score.to_be_bytes());
+fn set_output_u32_be_chunks(start_slot: usize, bytes32: [u8; 32]) {
+    for i in 0..8 {
+        let j = i * 4;
+        let w = u32::from_be_bytes([bytes32[j], bytes32[j + 1], bytes32[j + 2], bytes32[j + 3]]);
+        set_output(start_slot + i, w);
     }
-    let out = h.finalize();
-    let mut r = [0u8; 32];
-    r.copy_from_slice(&out);
-    r
 }
+
 
 fn main() {
     let input_bytes = read_input();
-    let inp: Input = bincode::deserialize(&input_bytes).expect("decode Input");
+    let inp: AuctionInput = bincode::deserialize(&input_bytes).expect("bad input encoding");
 
-    let kept = baseline_filter(&inp.solutions);
-    let computed = select_winners(&inp.solutions, &kept);
-
-    // equality check vs provided winners 
-    if computed.len() != inp.provided_winners.len() {
-        panic!("winner length mismatch");
+    if inp.solutions.len() > MAX_SOLUTIONS { panic!("too many solutions"); }
+    if inp.max_winners > MAX_WINNERS { panic!("max_winners too large"); }
+    if inp.tree_depth > MAX_TREE_DEPTH { panic!("tree_depth too large"); }
+     for sol in &inp.solutions {
+        if sol.trades.len() > MAX_TRADES_PER_SOLUTION { panic!("too many trades"); }
     }
-    for (a, b) in computed.iter().zip(inp.provided_winners.iter()) {
-        if a.id != b.id || a.solver != b.solver || a.score != b.score {
-            panic!("winner mismatch");
+
+    // score all solutions
+    let mut scored: Vec<ScoredSolution> = Vec::with_capacity(inp.solutions.len());
+    for sol in &inp.solutions {
+        scored.push(score_solution(sol));
+    }
+
+    // baseline filter 
+    scored = baseline_filter(scored);
+
+    // sort by total score desc (stable tie-breaker by commit bytes)
+    scored.sort_by(|a, b| {
+        b.total_score
+            .cmp(&a.total_score)
+            .then_with(|| b.sol_commit.cmp(&a.sol_commit))
+    });
+
+    // greedy pick winners with disjoint directed pairs across solutions
+    let winners = pick_winners_greedy(&scored, inp.max_winners);
+
+    // compute bidset_root from all solution commits in this snapshot, using fixed depth
+    let depth = inp.tree_depth as usize;
+    let leaf_count = 1usize << depth;
+
+    // canonical leaf order: sort by solution_commit bytes ascending (so roots don't depend on input order)
+    let mut all_commits: Vec<[u8; 32]> = Vec::with_capacity(inp.solutions.len());
+    for sol in &inp.solutions {
+        all_commits.push(solution_leaf_commit(sol));
+    }
+
+    all_commits.sort();
+
+    // pad/truncate to exactly 2^depth leaves
+    let mut leaves = Vec::with_capacity(leaf_count);
+    for i in 0..leaf_count {
+        if i < all_commits.len() {
+            leaves.push(all_commits[i]);
+        } else {
+            leaves.push([0u8; 32]);
         }
     }
+    let bidset_root = merkle_root(leaves, depth);
 
-    // publish auction_id (u64 -> 2 u32)
-    set_output(0, (inp.auction_id >> 32) as u32);
-    set_output(1, (inp.auction_id & 0xffffffff) as u32);
-
-    // publish winners_root (8 u32)
-    let root = winners_root(&computed);
-    for i in 0..8 {
-        let c = u32::from_be_bytes([root[i*4], root[i*4+1], root[i*4+2], root[i*4+3]]);
-        set_output(2 + i, c);
+    // winners_root over winner leave
+    let mut w_leaves: Vec<[u8; 32]> = Vec::with_capacity(winners.len().max(1));
+    for w in &winners {
+        w_leaves.push(winner_leaf(w.sol_commit, w.total_score));
     }
 
-    // publish winner_count
-    set_output(10, computed.len() as u32);
+    let mut pow2n = 1usize;
+    while pow2n < w_leaves.len().max(1) {
+        pow2n <<= 1;
+    }
+    while w_leaves.len() < pow2n {
+        w_leaves.push([0u8; 32]);
+    }
+    let winners_depth = pow2n.trailing_zeros() as usize;
+    let winners_root = merkle_root(w_leaves, winners_depth);
+
+    // publish outputs
+    set_output(0, winners.len() as u32);
+    set_output_u32_be_chunks(1, winners_root);
+    set_output_u32_be_chunks(9, bidset_root);
 }
