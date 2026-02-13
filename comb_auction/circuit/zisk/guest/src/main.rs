@@ -1,3 +1,8 @@
+/*
+This guest logic matches the autopilot winner selection.
+The potential optimisations: Replace keccak with zkVM friendly hash and reduce __udivti3 costs by division tricks.
+*/
+
 #![no_main]
 ziskos::entrypoint!(main);
 
@@ -245,10 +250,6 @@ fn is_sorted_by_uid(trades: &[TradeIn]) -> bool {
     true
 }
 
-fn u64_be(x: u64) -> [u8; 8] {
-    x.to_be_bytes()
-}
-
 fn u128_be(x: u128) -> [u8; 16] {
     x.to_be_bytes()
 }
@@ -264,33 +265,71 @@ fn solution_leaf_commit(sol: &SolutionIn) -> [u8; 32] {
         panic!("trades not sorted");
     }
 
+    const PRICE_ITEM_LEN: usize = 36;
+    const TRADE_ITEM_LEN: usize = 177;
+
     keccak256_stream(|k| {
-        // header
         k.update(b"SOL");
         k.update(&sol.solver.0);
-        k.update(&u64_be(sol.solution_id));
+        k.update(&sol.solution_id.to_be_bytes());
 
-        // prices (length + items)
-        let n_prices = sol.prices.len() as u32;
+        let n_prices: u32 = sol.prices.len() as u32;
         k.update(&n_prices.to_be_bytes());
+
         for (tok, price) in &sol.prices {
-            k.update(&tok.0);
-            k.update(&u128_be(*price));
+            let mut buf = [0u8; PRICE_ITEM_LEN];
+            // token address (20)
+            buf[0..20].copy_from_slice(&tok.0);
+            // price u128 BE (16)
+            buf[20..36].copy_from_slice(&price.to_be_bytes());
+            k.update(&buf);
         }
 
-        // trades (length + items)
-        let n_trades = sol.trades.len() as u32;
+        let n_trades: u32 = sol.trades.len() as u32;
         k.update(&n_trades.to_be_bytes());
+
         for t in &sol.trades {
-            k.update(&t.order_uid.0);
-            k.update(&t.sell_token.0);
-            k.update(&t.buy_token.0);
-            k.update(&u128_be(t.limit_sell));
-            k.update(&u128_be(t.limit_buy));
-            k.update(&u128_be(t.executed_sell));
-            k.update(&u128_be(t.executed_buy));
-            k.update(&[t.side as u8]);
-            k.update(&u128_be(t.native_price_buy));
+            let mut buf = [0u8; TRADE_ITEM_LEN];
+            let mut o = 0usize;
+
+            // uid (56)
+            buf[o..o + 56].copy_from_slice(&t.order_uid.0);
+            o += 56;
+
+            // sell token (20)
+            buf[o..o + 20].copy_from_slice(&t.sell_token.0);
+            o += 20;
+
+            // buy token (20)
+            buf[o..o + 20].copy_from_slice(&t.buy_token.0);
+            o += 20;
+
+            // limit_sell (16)
+            buf[o..o + 16].copy_from_slice(&t.limit_sell.to_be_bytes());
+            o += 16;
+
+            // limit_buy (16)
+            buf[o..o + 16].copy_from_slice(&t.limit_buy.to_be_bytes());
+            o += 16;
+
+            // executed_sell (16)
+            buf[o..o + 16].copy_from_slice(&t.executed_sell.to_be_bytes());
+            o += 16;
+
+            // executed_buy (16)
+            buf[o..o + 16].copy_from_slice(&t.executed_buy.to_be_bytes());
+            o += 16;
+
+            // side (1)
+            buf[o] = t.side as u8;
+            o += 1;
+
+            // native_price_buy (16)
+            buf[o..o + 16].copy_from_slice(&t.native_price_buy.to_be_bytes());
+            o += 16;
+
+            debug_assert!(o == TRADE_ITEM_LEN);
+            k.update(&buf);
         }
     })
 }
