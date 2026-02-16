@@ -11,8 +11,8 @@ import (
 
 const (
 	NMax       = 120 // Max number of solutions
-	TMax       = 30  // Max number of trades per solution
-	WMax       = 60  // Max number of winners
+	TMax       = 100 // Max number of trades per solution
+	WMax       = 80  // Max number of winners
 	TreeDepth  = 7   // must satisfy 2^TreeDepth >= NMax
 	AMT_BITS   = 64  // Bit width for token amounts
 	PRICE_BITS = 64  // Bit width for native price
@@ -178,7 +178,7 @@ func (c *Circuit) Define(api frontend.API) error {
 			totalScores[i] = sc
 
 			// bind PairScore[] to trades via RHS alpha identity (no scoring here)
-			enforcePairAggregationRHS(api, cmps, &c.Solutions[i], active, alpha, lhsAlpha)
+			enforcePairAggregationRHS(api, cmps, rc, &c.Solutions[i], active, alpha, lhsAlpha)
 
 			// leaf commitment (binds dataset; does NOT include score)
 			leaf := hashSolutionLeaf(api, &c.Solutions[i], tradesCommit, active)
@@ -218,7 +218,7 @@ func (c *Circuit) Define(api frontend.API) error {
 		// baseline_update(pairKey, pairScore) for single-pair solutions
 		key := c.Solutions[i].PairKey[0]
 		sc := c.Solutions[i].PairScore[0]
-		baselineUpdate(api, cmps, baseKey, baseScore, baseUsed, key, sc, use)
+		baselineUpdate(api, cmps, rc, baseKey, baseScore, baseUsed, key, sc, use)
 	}
 
 	// survives[i] = 1 if:
@@ -511,6 +511,7 @@ func computeSolutionScore(
 func enforcePairAggregationRHS(
 	api frontend.API,
 	cmps Comparators,
+	rc frontend.Rangechecker,
 	s *Solution,
 	active frontend.Variable,
 	alpha frontend.Variable,
@@ -527,6 +528,9 @@ func enforcePairAggregationRHS(
 	for k := 0; k < PairMax; k++ {
 		ka := api.Mul(active, isLessThanConst(api, cmps.LenPair, k, s.PairsLen))
 		rhs = api.Add(rhs, api.Mul(ka, api.Mul(s.PairScore[k], alphaPow[k])))
+
+		// enforce PairScore is a u128 when used
+		rc.Check(api.Select(ka, s.PairScore[k], 0), 128)
 
 		// enforce unused pair slots are zero (prevents hiding junk)
 		api.AssertIsEqual(api.Mul(api.Sub(1, ka), s.PairKey[k]), 0)
@@ -586,6 +590,7 @@ func baselineGet(
 func baselineUpdate(
 	api frontend.API,
 	cmps Comparators,
+	rc frontend.Rangechecker,
 	baseKey, baseScore, baseUsed []frontend.Variable,
 	key, sc, use frontend.Variable,
 ) {
@@ -601,7 +606,8 @@ func baselineUpdate(
 		eq := api.IsZero(api.Sub(key, baseKey[j]))
 		doUpd := api.Mul(use, api.Mul(baseUsed[j], eq))
 
-		lt := cmps.Score.IsLess(baseScore[j], sc) // 1 if baseScore < sc
+		// lt == 1 iff baseScore[j] < sc (strict)
+		lt := hintIsLessStrict(api, rc, baseScore[j], sc, 128, doUpd)
 		newScore := api.Select(lt, sc, baseScore[j])
 		baseScore[j] = api.Select(doUpd, newScore, baseScore[j])
 	}
@@ -637,7 +643,6 @@ func greedySelectWinners(
 		winners[w].Score = frontend.Variable(0)
 	}
 
-	// used pairs stored per winner-slot (avoids dynamic append)
 	var usedKey [WMax][PairMax]frontend.Variable
 	var usedMask [WMax][PairMax]frontend.Variable
 	var usedSlotMask [WMax]frontend.Variable
@@ -654,29 +659,38 @@ func greedySelectWinners(
 
 	for i := 0; i < NMax; i++ {
 		activeI := isLessThanConst(api, cmps.LenSol, i, aliveLen)
-
-		// hasPairs := PairsLen > 0
 		hasPairs := api.Sub(1, api.IsZero(packed[i].PairsLen))
 		activeI = api.Mul(activeI, hasPairs)
 
-		// conflict := any(candidate pair equals any used pair)
-		conflict := frontend.Variable(0)
+		// precompute candActive[cp]: depends only on (i, cp)
+		var candActive [PairMax]frontend.Variable
+		for cp := 0; cp < PairMax; cp++ {
+			candActive[cp] = api.Mul(activeI, isLessThanConst(api, cmps.LenPair, cp, packed[i].PairsLen))
+		}
+
+		// use Add accumulation instead of Or (Add is free in R1CS)
+		conflictSum := frontend.Variable(0)
 		for w := 0; w < WMax; w++ {
 			for p := 0; p < PairMax; p++ {
 				usedActive := api.Mul(usedSlotMask[w], usedMask[w][p])
 				for cp := 0; cp < PairMax; cp++ {
-					candActive := api.Mul(activeI, isLessThanConst(api, cmps.LenPair, cp, packed[i].PairsLen))
 					eq := api.IsZero(api.Sub(packed[i].PairKey[cp], usedKey[w][p]))
-					conflict = api.Or(conflict, api.Mul(api.Mul(usedActive, candActive), eq))
+					conflictSum = api.Add(conflictSum, api.Mul(api.Mul(usedActive, candActive[cp]), eq))
 				}
 			}
 		}
+		// Single IsZero to convert sum to boolean
+		conflict := api.Sub(1, api.IsZero(conflictSum))
 
-		// canPick = activeI && !conflict && winCount < WMax
 		hasSlot := isLessThanVarConst(api, cmps.LenWin, winCount, WMax)
 		canPick := api.Mul(activeI, api.Mul(api.Sub(1, conflict), hasSlot))
 
-		// If pick, write into winners[winCount] and into usedKey/usedMask at the same slot.
+		// precompute pairActive[p] — depends only on (i, p)
+		var pairActive [PairMax]frontend.Variable
+		for p := 0; p < PairMax; p++ {
+			pairActive[p] = isLessThanConst(api, cmps.LenPair, p, packed[i].PairsLen)
+		}
+
 		for w := 0; w < WMax; w++ {
 			isThisSlot := api.IsZero(api.Sub(winCount, w))
 			write := api.Mul(canPick, isThisSlot)
@@ -688,8 +702,7 @@ func greedySelectWinners(
 			usedSlotMask[w] = api.Select(write, frontend.Variable(1), usedSlotMask[w])
 
 			for p := 0; p < PairMax; p++ {
-				pa := isLessThanConst(api, cmps.LenPair, p, packed[i].PairsLen)
-				wrP := api.Mul(write, pa)
+				wrP := api.Mul(write, pairActive[p])
 				usedKey[w][p] = api.Select(wrP, packed[i].PairKey[p], usedKey[w][p])
 				usedMask[w][p] = api.Select(wrP, frontend.Variable(1), usedMask[w][p])
 			}
@@ -698,8 +711,6 @@ func greedySelectWinners(
 		winCount = api.Add(winCount, canPick)
 	}
 
-	// Optional sanity checks
-	// used masks are boolean
 	for w := 0; w < WMax; w++ {
 		assertBoolIf(api, usedSlotMask[w], 1)
 		for p := 0; p < PairMax; p++ {
@@ -811,6 +822,47 @@ func divFloor(api frontend.API, rc frontend.Rangechecker, a, b frontend.Variable
 	rc.Check(s, bBits)
 
 	return q
+}
+
+// hintIsLessStrict returns 1 if a < b (strict), else 0.
+// Circuit verifies the hint via range checks on the difference.
+func hintIsLessStrict(
+	api frontend.API,
+	rc frontend.Rangechecker,
+	a, b frontend.Variable,
+	bits int,
+	cond frontend.Variable,
+) frontend.Variable {
+	out, err := api.NewHint(isLessHint, 1, a, b)
+	if err != nil {
+		panic(err)
+	}
+	lt := out[0]
+	assertBoolIf(api, lt, cond)
+
+	// If lt==1: b - a - 1 >= 0  (meaning b > a)
+	// If lt==0: a - b >= 0      (meaning a >= b)
+	dPos := api.Sub(api.Sub(b, a), 1) // b-a-1
+	dNeg := api.Sub(a, b)             // a-b
+	checkVal := api.Select(lt, dPos, dNeg)
+	rc.Check(api.Select(cond, checkVal, 0), bits)
+
+	return lt
+}
+
+// results[0] = 1 if a < b else 0
+func isLessHint(mod *big.Int, inputs []*big.Int, results []*big.Int) error {
+	if len(inputs) != 2 || len(results) != 1 {
+		return nil
+	}
+	a := new(big.Int).Set(inputs[0])
+	b := new(big.Int).Set(inputs[1])
+	if a.Cmp(b) < 0 {
+		results[0].SetInt64(1)
+	} else {
+		results[0].SetInt64(0)
+	}
+	return nil
 }
 
 // results[0] = q = floor(a/b)
