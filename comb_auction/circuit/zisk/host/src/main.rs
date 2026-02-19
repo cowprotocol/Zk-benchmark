@@ -20,7 +20,7 @@ Usage:
 cargo-zisk verify-constraints -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey
 5. Program setup: cd guest && cargo-zisk rom-setup -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -k $HOME/.zisk/provingKey
 6. Generate proof: cd guest && LIB_EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
-cargo-zisk prove -e target/riscv64ima-zisk-zkvm-elf/release/yourzisk_comb_auction_program -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey -o proof
+cargo-zisk prove -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction_program -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey -o proof
 
 This is needed only for the first time and only iff the guest code is changed. You can just call the 1 & 6 step directly if the guest code remains same and you have executed all these commands before.
 Commands 2,3 & 4 are just for metrics and statistics and can be skipped, although command 4 is recommened to be called to check if guest and host code are compatible.
