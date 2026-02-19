@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+auction_caps = { path = "../auction_caps" }
 ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.15.0" }
 tiny-keccak = { version = "=2.0.2", default-features = false, features = ["keccak"] }
 

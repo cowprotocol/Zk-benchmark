@@ -8,13 +8,9 @@ ziskos::entrypoint!(main);
 
 use tiny_keccak::{Hasher, Keccak};
 use ziskos::{read_input, set_output};
+use auction_caps::{MAX_SOLUTIONS, MAX_TRADES_PER_SOLUTION, MAX_WINNERS, MAX_PAIRS_PER_SOLUTION, MAX_TREE_DEPTH};
 
 const ONE_E18: u128 = 1_000_000_000_000_000_000u128;
-const MAX_SOLUTIONS: usize = 100;
-const MAX_TRADES_PER_SOLUTION: usize = 100;
-const MAX_WINNERS: usize = 60;
-const MAX_PAIRS_PER_SOLUTION: usize = 20;
-const MAX_TREE_DEPTH: u8 = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Address20(pub [u8; 20]);

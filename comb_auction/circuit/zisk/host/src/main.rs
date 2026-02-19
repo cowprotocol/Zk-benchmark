@@ -1,263 +1,368 @@
-use rand::{Rng, SeedableRng};
-use rand::rngs::StdRng;
-use std::fs::File;
-use std::io::Write;
+use std::{
+    collections::HashMap,
+    fs,
+    io::Write,
+    path::{PathBuf},
+    process::{Command, Stdio},
+};
+use clap::Parser;
+use serde::Deserialize;
+use auction_caps::*;
+/*
+Usage:
+1. Just for building the input.bin for ziskemu execution: cd host && cargo run -- \
+  --auction-start 12310225 \
+  --auction-end 12311225 \
+  --auction-index 13 \
+2. Execute using ziskemu: cd guest && ziskemu -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin 
+3. Performance metrics: cd guest && ziskemu -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -X -S -D
+4. Verify constraints: cd guest && LIB_EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
+cargo-zisk verify-constraints -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey
+5. Program setup: cd guest && cargo-zisk rom-setup -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -k $HOME/.zisk/provingKey
+6. Generate proof: cd guest && LIB_EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
+cargo-zisk prove -e target/riscv64ima-zisk-zkvm-elf/release/yourzisk_comb_auction_program -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey -o proof
 
-const ONE_E18: u128 = 1_000_000_000_000_000_000;
-const NUM_SOLUTIONS: usize = 100;
-const TRADES_PER_SOLUTION: usize = 100;
-const NUM_TOKENS: usize = 40;
-const NUM_SOLVERS: usize = 30;
+This is needed only for the first time and only iff the guest code is changed. You can just call the 1 & 6 step directly if the guest code remains same and you have executed all these commands before.
+Commands 2,3 & 4 are just for metrics and statistics and can be skipped, although command 4 is recommened to be called to check if guest and host code are compatible.
+*/
 
-const MAX_WINNERS: u32 = 60;
-const TREE_DEPTH: u8 = 7;
-const SEED: u64 = 12345;
+#[derive(Parser, Debug)]
+#[command(name = "auction-host")]
+struct Cli {
+    #[arg(long)]
+    auction_start: u64,
+    #[arg(long)]
+    auction_end: u64,
+    #[arg(long)]
+    auction_index: usize,
+    #[arg(long, default_value = "../../../data/fetch.py")]
+    fetch_script: PathBuf,
 
-const MIN_AMOUNT: u128 = 1_000_000;
-const MAX_AMOUNT: u128 = 1_000_000_000_000_000;
-const MIN_PRICE: u128 = ONE_E18 / 10000;
-const MAX_PRICE: u128 = ONE_E18 * 10000;
+    #[arg(long, default_value = "../../../data/")]
+    data_dir: PathBuf,
 
-const MIN_FRAC_BPS: u128 = 5000;  // 50%
-const MAX_FRAC_BPS: u128 = 10000; 
+    #[arg(long, default_value = "../guest/build")]
+    build_dir: PathBuf,
+}
+
+#[derive(Deserialize, Debug)]
+struct FetchOutput {
+    auctions: Vec<AuctionJson>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct AuctionJson {
+    auction_id: u64,
+    solutions: Vec<SolutionJson>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct SolutionJson {
+    solution_uid: u64,
+    solver: String, 
+    trades: Vec<TradeJson>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct TradeJson {
+    order_uid: String,          
+    sell_token: String,          
+    buy_token: String,          
+    limit_sell: String,   
+    limit_buy: String,    
+    exec_sell: String,    
+    exec_buy: String,     
+    side: u8,                
+    buy_token_price_e18: String
+}
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Address20(pub [u8; 20]);
-
-#[derive(Clone, Copy, Debug)]
-pub enum Side {
-    Sell = 0,
-    Buy = 1,
-}
+struct Address20([u8; 20]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct OrderUid(pub [u8; 56]);
+struct OrderUid([u8; 56]);
 
 #[derive(Clone, Debug)]
-pub struct TradeIn {
-    pub order_uid: OrderUid,
-    pub sell_token: Address20,
-    pub buy_token: Address20,
-
-    pub limit_sell: u128,
-    pub limit_buy: u128,
-
-    pub executed_sell: u128,
-    pub executed_buy: u128,
-
-    pub side: Side,
-    pub native_price_buy: u128,
+struct TradeIn {
+    order_uid: OrderUid,
+    sell_token: Address20,
+    buy_token: Address20,
+    limit_sell: u128,
+    limit_buy: u128,
+    executed_sell: u128,
+    executed_buy: u128,
+    side: u8, // 0/1
+    native_price_buy: u128,
 }
 
 #[derive(Clone, Debug)]
-pub struct SolutionIn {
-    pub solver: Address20,
-    pub solution_id: u64,
-
-    pub prices: Vec<(Address20, u128)>,
-    pub trades: Vec<TradeIn>,
+struct SolutionIn {
+    solver: Address20,
+    solution_id: u64,
+    prices: Vec<(Address20, u128)>, // sorted by token
+    trades: Vec<TradeIn>,           // sorted by order_uid
 }
 
 #[derive(Clone, Debug)]
-pub struct AuctionInput {
-    pub auction_id: u64,
-    pub max_winners: u32,
-    pub tree_depth: u8,
-    pub solutions: Vec<SolutionIn>,
+struct AuctionInput {
+    auction_id: u64,
+    max_winners: u32,
+    tree_depth: u8,
+    solutions: Vec<SolutionIn>,
 }
 
-fn random_address(rng: &mut StdRng) -> Address20 {
-    let mut addr = [0u8; 20];
-    rng.fill(&mut addr);
-    Address20(addr)
+fn parse_hex_bytes(s: &str) -> Result<Vec<u8>, String> {
+    let s = s.strip_prefix("0x").unwrap_or(s);
+    if s.len() % 2 != 0 {
+        return Err(format!("hex has odd length: {s}"));
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for i in (0..s.len()).step_by(2) {
+        let b = u8::from_str_radix(&s[i..i + 2], 16)
+            .map_err(|e| format!("invalid hex byte at {i}: {e} ({s})"))?;
+        out.push(b);
+    }
+    Ok(out)
 }
 
-#[inline]
-fn push_u8(out: &mut Vec<u8>, x: u8) {
-    out.push(x);
+fn parse_addr(s: &str) -> Result<Address20, String> {
+    let b = parse_hex_bytes(s)?;
+    if b.len() != 20 {
+        return Err(format!("expected 20-byte address, got {} bytes: {s}", b.len()));
+    }
+    let mut a = [0u8; 20];
+    a.copy_from_slice(&b);
+    Ok(Address20(a))
 }
 
-#[inline]
-fn push_u32_be(out: &mut Vec<u8>, x: u32) {
-    out.extend_from_slice(&x.to_be_bytes());
+fn parse_uid(s: &str) -> Result<OrderUid, String> {
+    let b = parse_hex_bytes(s)?;
+    if b.len() != 56 {
+        return Err(format!("expected 56-byte uid, got {} bytes: {s}", b.len()));
+    }
+    let mut a = [0u8; 56];
+    a.copy_from_slice(&b);
+    Ok(OrderUid(a))
 }
 
-#[inline]
-fn push_u64_be(out: &mut Vec<u8>, x: u64) {
-    out.extend_from_slice(&x.to_be_bytes());
+fn parse_u128_dec(s: &str) -> Result<u128, String> {
+    s.parse::<u128>().map_err(|e| format!("invalid u128 decimal '{s}': {e}"))
 }
 
-#[inline]
-fn push_u128_be(out: &mut Vec<u8>, x: u128) {
-    out.extend_from_slice(&x.to_be_bytes());
-}
 
-#[inline]
-fn push_addr20(out: &mut Vec<u8>, a: Address20) {
-    out.extend_from_slice(&a.0);
-}
+fn build_auction_input(aj: &AuctionJson) -> Result<AuctionInput, String> {
+    let mut solutions: Vec<SolutionIn> = Vec::with_capacity(aj.solutions.len());
 
-#[inline]
-fn push_uid56(out: &mut Vec<u8>, uid: OrderUid) {
-    out.extend_from_slice(&uid.0);
-}
+    for sj in &aj.solutions {
+        let solver = parse_addr(&sj.solver)?;
 
-fn encode_packed(inp: &AuctionInput) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1_000_000);
-
-    push_u64_be(&mut out, inp.auction_id);
-    push_u32_be(&mut out, inp.max_winners);
-    push_u8(&mut out, inp.tree_depth);
-    push_u32_be(&mut out, inp.solutions.len() as u32);
-
-    for sol in &inp.solutions {
-        push_addr20(&mut out, sol.solver);
-        push_u64_be(&mut out, sol.solution_id);
-
-        push_u32_be(&mut out, sol.prices.len() as u32);
-        for (tok, price) in &sol.prices {
-            push_addr20(&mut out, *tok);
-            push_u128_be(&mut out, *price);
+        let mut trades: Vec<TradeIn> = Vec::with_capacity(sj.trades.len());
+        for tj in &sj.trades {
+            if tj.side != 0 && tj.side != 1 {
+                return Err(format!("invalid side {} for order_uid {}", tj.side, tj.order_uid));
+            }
+            trades.push(TradeIn {
+                order_uid: parse_uid(&tj.order_uid)?,
+                sell_token: parse_addr(&tj.sell_token)?,
+                buy_token: parse_addr(&tj.buy_token)?,
+                limit_sell: parse_u128_dec(&tj.limit_sell)?,
+                limit_buy: parse_u128_dec(&tj.limit_buy)?,
+                executed_sell: parse_u128_dec(&tj.exec_sell)?,
+                executed_buy: parse_u128_dec(&tj.exec_buy)?,
+                side: tj.side,
+                native_price_buy: parse_u128_dec(&tj.buy_token_price_e18)?,
+            });
         }
 
-        push_u32_be(&mut out, sol.trades.len() as u32);
+        // guest requires trades sorted by uid ascending
+        trades.sort_by(|a, b| a.order_uid.0.cmp(&b.order_uid.0));
+
+        // prices: dedupe buy-token prices we know, sorted by token address, since sell_token is not used for winner selection and only for canonical root
+        let mut price_map: HashMap<[u8; 20], u128> = HashMap::new();
+        for t in &trades {
+            price_map.entry(t.buy_token.0).or_insert(t.native_price_buy);
+        }
+        let mut prices: Vec<(Address20, u128)> = price_map
+            .into_iter()
+            .map(|(addr, p)| (Address20(addr), p))
+            .collect();
+        prices.sort_by(|(a, _), (b, _)| a.0.cmp(&b.0));
+
+        solutions.push(SolutionIn {
+            solver,
+            solution_id: sj.solution_uid,
+            prices,
+            trades,
+        });
+    }
+
+    Ok(AuctionInput {
+        auction_id: aj.auction_id,
+        max_winners: MAX_WINNERS as u32,
+        tree_depth: MAX_TREE_DEPTH,
+        solutions,
+    })
+}
+
+
+fn encode_packed(inp: &AuctionInput) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(4_000_000);
+
+    macro_rules! push_u8   { ($v:expr) => { out.push($v as u8) } }
+    macro_rules! push_u32  { ($v:expr) => { out.extend_from_slice(&($v as u32).to_be_bytes()) } }
+    macro_rules! push_u64  { ($v:expr) => { out.extend_from_slice(&($v as u64).to_be_bytes()) } }
+    macro_rules! push_u128 { ($v:expr) => { out.extend_from_slice(&($v as u128).to_be_bytes()) } }
+    macro_rules! push_addr { ($a:expr) => { out.extend_from_slice(&($a).0) } }
+    macro_rules! push_uid  { ($u:expr) => { out.extend_from_slice(&($u).0) } }
+
+    push_u64!(inp.auction_id);
+    push_u32!(inp.max_winners);
+    push_u8!(inp.tree_depth);
+    push_u32!(inp.solutions.len() as u32);
+
+    for sol in &inp.solutions {
+        push_addr!(sol.solver);
+        push_u64!(sol.solution_id);
+
+        push_u32!(sol.prices.len() as u32);
+        for (tok, price) in &sol.prices {
+            push_addr!(*tok);
+            push_u128!(*price);
+        }
+
+        push_u32!(sol.trades.len() as u32);
         for t in &sol.trades {
-            push_uid56(&mut out, t.order_uid);
-            push_addr20(&mut out, t.sell_token);
-            push_addr20(&mut out, t.buy_token);
+            push_uid!(t.order_uid);
+            push_addr!(t.sell_token);
+            push_addr!(t.buy_token);
 
-            push_u128_be(&mut out, t.limit_sell);
-            push_u128_be(&mut out, t.limit_buy);
+            push_u128!(t.limit_sell);
+            push_u128!(t.limit_buy);
 
-            push_u128_be(&mut out, t.executed_sell);
-            push_u128_be(&mut out, t.executed_buy);
+            push_u128!(t.executed_sell);
+            push_u128!(t.executed_buy);
 
-            push_u8(&mut out, t.side as u8);
+            push_u8!(t.side);
 
-            push_u128_be(&mut out, t.native_price_buy);
+            push_u128!(t.native_price_buy);
         }
     }
 
     out
 }
 
-fn generate_auction() -> AuctionInput {
-    let mut rng = StdRng::seed_from_u64(SEED);
+fn ensure_fetch_json(cli: &Cli) -> PathBuf {
+    let json_path = cli.data_dir.join(format!(
+        "auctions_{}_{}.json",
+        cli.auction_start, cli.auction_end
+    ));
 
-    let tokens: Vec<Address20> = (0..NUM_TOKENS).map(|_| random_address(&mut rng)).collect();
-    let solvers: Vec<Address20> = (0..NUM_SOLVERS).map(|_| random_address(&mut rng)).collect();
-
-    let mut order_counter: u64 = 0;
-    let mut solutions = Vec::with_capacity(NUM_SOLUTIONS);
-
-    for solution_id in 0..NUM_SOLUTIONS as u64 {
-        let solver = solvers[rng.gen_range(0..NUM_SOLVERS)];
-
-        // Pick a token pair for this solution
-        let sell_idx = rng.gen_range(0..NUM_TOKENS);
-        let mut buy_idx = rng.gen_range(0..NUM_TOKENS);
-        while buy_idx == sell_idx {
-            buy_idx = rng.gen_range(0..NUM_TOKENS);
-        }
-        let sell_token = tokens[sell_idx];
-        let buy_token = tokens[buy_idx];
-        // Generate trades
-        let mut trades = Vec::with_capacity(TRADES_PER_SOLUTION);
-        for _ in 0..TRADES_PER_SOLUTION {
-            order_counter += 1;
-
-            // uid[0..8] = counter, rest random
-            let mut uid = [0u8; 56];
-            uid[0..8].copy_from_slice(&order_counter.to_be_bytes());
-            rng.fill(&mut uid[8..]);
-
-            let side = if rng.gen_bool(0.5) { Side::Sell } else { Side::Buy };
-            let limit_sell = rng.gen_range(MIN_AMOUNT..=MAX_AMOUNT);
-            let limit_buy = rng.gen_range(MIN_AMOUNT..=MAX_AMOUNT);
-
-            // Generate execution with positive surplus
-            let surplus_bps: u128 = rng.gen_range(10u128..=500u128);
-            let frac_bps: u128 = rng.gen_range(MIN_FRAC_BPS..=MAX_FRAC_BPS);
-
-            let (executed_sell, executed_buy) = match side {
-                Side::Sell => {
-                    let executed_sell = limit_sell.saturating_mul(frac_bps) / 10_000;
-                    let proportional = limit_buy
-                        .saturating_mul(executed_sell)
-                        / limit_sell.max(1);
-                    let executed_buy = proportional
-                        .saturating_mul(10_000 + surplus_bps)
-                        / 10_000;
-                    (executed_sell.max(1), executed_buy.max(1))
-                }
-                Side::Buy => {
-                    let executed_buy = limit_buy.saturating_mul(frac_bps) / 10_000;
-                    let proportional = limit_sell
-                        .saturating_mul(executed_buy)
-                        / limit_buy.max(1);
-                    let executed_sell = proportional
-                        .saturating_mul(10_000 - surplus_bps)
-                        / 10_000;
-                    (executed_sell.max(1), executed_buy.max(1))
-                }
-            };
-
-            trades.push(TradeIn {
-                order_uid: OrderUid(uid),
-                sell_token,
-                buy_token,
-                limit_sell,
-                limit_buy,
-                executed_sell,
-                executed_buy,
-                side,
-                native_price_buy: rng.gen_range(MIN_PRICE..=MAX_PRICE),
-            });
-        }
-
-        trades.sort_by(|a, b| a.order_uid.0.cmp(&b.order_uid.0));
-
-        // Prices (guest expects sorted by token)
-        let mut prices = vec![
-            (sell_token, rng.gen_range(MIN_PRICE..=MAX_PRICE)),
-            (buy_token, rng.gen_range(MIN_PRICE..=MAX_PRICE)),
-        ];
-        prices.sort_by(|(t1, _), (t2, _)| t1.0.cmp(&t2.0));
-
-        solutions.push(SolutionIn {
-            solver,
-            solution_id,
-            prices,
-            trades,
-        });
+    if json_path.exists() {
+        println!("[host] Using cached {}", json_path.display());
+        return json_path;
     }
 
-    AuctionInput {
-        auction_id: rng.gen(),
-        max_winners: MAX_WINNERS,
-        tree_depth: TREE_DEPTH,
-        solutions,
+    println!("[host] JSON not found — running fetch script …");
+
+    let status = Command::new("python3")
+        .arg(&cli.fetch_script)
+        .arg("--auction_start")
+        .arg(cli.auction_start.to_string())
+        .arg("--auction_end")
+        .arg(cli.auction_end.to_string())
+        .arg("--auction_index")
+        .arg(cli.auction_index.to_string())
+        .current_dir(&cli.data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .unwrap_or_else(|e| panic!("failed to launch fetch script: {e}"));
+
+    if !status.success() {
+        panic!(
+            "fetch script exited with status {status}. \
+             Make sure PROD_DB_URL is set and the script path is correct."
+        );
     }
+
+    if !json_path.exists() {
+        panic!("fetch script succeeded but {} was not created", json_path.display());
+    }
+
+    json_path
 }
 
 fn main() {
-    let auction = generate_auction();
-    let encoded = encode_packed(&auction);
+    let cli = Cli::parse();
 
-    std::fs::create_dir_all("../guest/build").expect("failed to create ../guest/build");
+    let json_path = ensure_fetch_json(&cli);
 
-    let mut file = File::create("../guest/build/input.bin").expect("failed to create input.bin");
-    file.write_all(&encoded).expect("failed to write input.bin");
+    let json_text = fs::read_to_string(&json_path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", json_path.display()));
 
+    let fetch_output: FetchOutput =
+        serde_json::from_str(&json_text).unwrap_or_else(|e| panic!("JSON parse error: {e}"));
+
+    let auctions = &fetch_output.auctions;
+    if auctions.is_empty() {
+        panic!("No auctions exported");
+    }
+    if cli.auction_index >= auctions.len() {
+        panic!(
+            "auction_index {} out of bounds (0..{})",
+            cli.auction_index,
+            auctions.len() - 1
+        );
+    }
+
+    let auction_json = &auctions[cli.auction_index];
     println!(
-        "Generated input.bin: {} bytes ({:.2} MB)",
-        encoded.len(),
-        encoded.len() as f64 / 1_000_000.0
+        "[host] Selected auction_id={} (index {} of {}), solutions={}",
+        auction_json.auction_id,
+        cli.auction_index,
+        auctions.len(),
+        auction_json.solutions.len()
     );
+
+    if auction_json.solutions.len() > MAX_SOLUTIONS {
+        panic!(
+            "solutions={} exceeds MAX_SOLUTIONS={}",
+            auction_json.solutions.len(),
+            MAX_SOLUTIONS
+        );
+    }
+    for (i, sol) in auction_json.solutions.iter().enumerate() {
+        if sol.trades.len() > MAX_TRADES_PER_SOLUTION {
+            panic!(
+                "solution[{i}] trades={} exceeds MAX_TRADES_PER_SOLUTION={}",
+                sol.trades.len(),
+                MAX_TRADES_PER_SOLUTION
+            );
+        }
+    }
+
+    let auction_input = build_auction_input(auction_json)
+        .unwrap_or_else(|e| panic!("failed to build AuctionInput: {e}"));
+    let encoded = encode_packed(&auction_input);
+
+    fs::create_dir_all(&cli.build_dir)
+        .unwrap_or_else(|e| panic!("cannot create build dir {}: {e}", cli.build_dir.display()));
+
+    let input_bin = cli.build_dir.join("input.bin");
+    let mut f = fs::File::create(&input_bin)
+        .unwrap_or_else(|e| panic!("cannot create {}: {e}", input_bin.display()));
+    f.write_all(&encoded)
+        .unwrap_or_else(|e| panic!("cannot write input.bin: {e}"));
+
+    let total_trades: usize = auction_input.solutions.iter().map(|s| s.trades.len()).sum();
     println!(
-        "Solutions: {}, Trades/solution: {}, Total trades: {}",
-        auction.solutions.len(),
-        auction.solutions[0].trades.len(),
-        auction.solutions.len() * auction.solutions[0].trades.len()
+        "[host] Wrote {} ({:.3} MB) — auction_id={}, solutions={}, total_trades={}",
+        input_bin.display(),
+        encoded.len() as f64 / 1_000_000.0,
+        auction_input.auction_id,
+        auction_input.solutions.len(),
+        total_trades,
     );
 }
