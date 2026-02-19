@@ -3,6 +3,7 @@ package comb_gnark
 import (
 	"math/big"
 
+	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/hash/mimc"
 	"github.com/consensys/gnark/std/math/cmp"
@@ -11,11 +12,11 @@ import (
 
 const (
 	NMax       = 120 // Max number of solutions
-	TMax       = 100 // Max number of trades per solution
-	WMax       = 80  // Max number of winners
+	TMax       = 10  // Max number of trades per solution
+	WMax       = 30  // Max number of winners
 	TreeDepth  = 7   // must satisfy 2^TreeDepth >= NMax
-	AMT_BITS   = 64  // Bit width for token amounts
-	PRICE_BITS = 64  // Bit width for native price
+	AMT_BITS   = 128 // Bit width for token amounts
+	PRICE_BITS = 96  // Bit width for native price
 	PairMax    = 10
 )
 
@@ -126,6 +127,10 @@ type Circuit struct {
 	Solutions    [NMax]Solution
 }
 
+func init() {
+	solver.RegisterHint(IsLessHint, DivModHint)
+}
+
 func (c *Circuit) Define(api frontend.API) error {
 	// Basic bounds
 	cmps := newComparators(api)
@@ -153,8 +158,8 @@ func (c *Circuit) Define(api frontend.API) error {
 	totalScores := make([]frontend.Variable, NMax)
 
 	// derive global challenge r from public inputs
-	r := deriveChallengeR(api, c.BidsetRoot, c.AuctionID)
-	rPair := derivePairChallenge(api, c.BidsetRoot, c.AuctionID)
+	r := deriveChallengeR(api, c.AuctionID)
+	rPair := derivePairChallenge(api, c.AuctionID)
 
 	for i := 0; i < (1 << TreeDepth); i++ {
 		if i < NMax {
@@ -173,7 +178,7 @@ func (c *Circuit) Define(api frontend.API) error {
 			tradesCommit := computeTradesCommit(api, cmps, &c.Solutions[i], active, r)
 
 			// score + pair aggregation binding in one pass (no double-scoring)
-			alpha := deriveAlpha(api, c.BidsetRoot, c.AuctionID, c.Solutions[i].Solver.Value, c.Solutions[i].SolutionID.Value)
+			alpha := deriveAlpha(api, c.AuctionID, c.Solutions[i].Solver.Value, c.Solutions[i].SolutionID.Value)
 			sc, lhsAlpha := computeSolutionScore(api, cmps, rc, &c.Solutions[i], active, alpha, rPair)
 			totalScores[i] = sc
 
@@ -311,7 +316,8 @@ func (c *Circuit) Define(api frontend.API) error {
 		// if scores equal: commit[i] >= commit[i+1] (desc)
 		eqScore := api.IsZero(api.Sub(packed[i].Score, packed[i+1].Score))
 		cond := api.Mul(both, eqScore)
-		assertGeqIf(api, cmps.U64, packed[i].SolutionID, packed[i+1].SolutionID, cond)
+		ltCommit := hintIsLessStrict(api, rc, packed[i].Commit, packed[i+1].Commit, 254, cond)
+		api.AssertIsEqual(api.Mul(cond, ltCommit), 0)
 	}
 
 	// Greedy select winners with disjoint directed pairs across solutions
@@ -320,9 +326,10 @@ func (c *Circuit) Define(api frontend.API) error {
 	// Compare computed winners to public Winners (up to WinnersLen)
 	for w := 0; w < WMax; w++ {
 		activeW := isLessThanConst(api, cmps.LenWin, w, c.WinnersLen)
-		api.AssertIsEqual(api.Select(activeW, computed[w].SolutionID, c.Winners[w].SolutionID), c.Winners[w].SolutionID)
-		api.AssertIsEqual(api.Select(activeW, computed[w].Solver, c.Winners[w].Solver), c.Winners[w].Solver)
-		api.AssertIsEqual(api.Select(activeW, computed[w].Score, c.Winners[w].Score), c.Winners[w].Score)
+		api.AssertIsEqual(api.Mul(activeW, api.Sub(computed[w].SolutionID, c.Winners[w].SolutionID)), 0)
+		api.AssertIsEqual(api.Mul(activeW, api.Sub(computed[w].Solver, c.Winners[w].Solver)), 0)
+		api.AssertIsEqual(api.Mul(activeW, api.Sub(computed[w].Score, c.Winners[w].Score)), 0)
+
 	}
 
 	return nil
@@ -339,9 +346,9 @@ func hashSolutionLeaf(
 }
 
 // ideally it should also have some randomness after bidset_root is fixed to prevent malleability when solver chooses the witnesses.
-func deriveChallengeR(api frontend.API, bidsetRoot, auctionID frontend.Variable) frontend.Variable {
+func deriveChallengeR(api frontend.API, auctionID frontend.Variable) frontend.Variable {
 	h, _ := mimc.NewMiMC(api)
-	h.Write(bidsetRoot, auctionID)
+	h.Write(auctionID, 0xA11CE001)
 	r := h.Sum()
 	return r
 }
@@ -367,7 +374,7 @@ func computeTradesCommit(api frontend.API, cmps Comparators, s *Solution, active
 	pow := frontend.Variable(1)
 
 	for t := 0; t < TMax; t++ {
-		ta := api.Mul(active, isLessThanVarConst(api, cmps.LenTr, s.TradesLen, t+1))
+		ta := api.Mul(active, isLessThanConst(api, cmps.LenTr, t, s.TradesLen))
 		tr := s.Trades[t]
 
 		// gated fields (0 when trade inactive)
@@ -405,17 +412,17 @@ func computeTradesCommit(api frontend.API, cmps Comparators, s *Solution, active
 	return api.Select(active, acc, 0)
 }
 
-func derivePairChallenge(api frontend.API, bidsetRoot, auctionID frontend.Variable) frontend.Variable {
+func derivePairChallenge(api frontend.API, auctionID frontend.Variable) frontend.Variable {
 	h, _ := mimc.NewMiMC(api)
 	// domain separator so it's not the same as the trades-commit challenge
-	h.Write(bidsetRoot, auctionID, 123456789)
+	h.Write(auctionID, 0xA11CE002)
 	return h.Sum()
 }
 
-func deriveAlpha(api frontend.API, bidsetRoot, auctionID, solver, solutionID frontend.Variable) frontend.Variable {
+func deriveAlpha(api frontend.API, auctionID, solver, solutionID frontend.Variable) frontend.Variable {
 	h, _ := mimc.NewMiMC(api)
 	// domain separator distinct from r/rPair
-	h.Write(bidsetRoot, auctionID, 7777777, solver, solutionID)
+	h.Write(auctionID, 0xA11CE003, solver, solutionID)
 	return h.Sum()
 }
 
@@ -439,7 +446,7 @@ func computeSolutionScore(
 	}
 
 	for t := 0; t < TMax; t++ {
-		ta := api.Mul(active, isLessThanVarConst(api, cmps.LenTr, s.TradesLen, t+1))
+		ta := api.Mul(active, isLessThanConst(api, cmps.LenTr, t, s.TradesLen))
 		tr := s.Trades[t]
 
 		// Ensure inactive trade fields are 0-ish (so unconditional range checks are safe)
@@ -461,6 +468,10 @@ func computeSolutionScore(
 		expKey := api.Add(tr.SellToken.Value, api.Mul(rPair, tr.BuyToken.Value))
 		enforceKeyMatchBySelector(api, s.PairKey[:], pi, expKey, ta)
 
+		// Guard divisors against 0 for inactive trades
+		safeLimSell := api.Select(ta, tr.SellAmount, 1)
+		safeLimBuy := api.Select(ta, tr.BuyAmount, 1)
+
 		// Sell side:
 		// partial_limit_buy = ceil(limit_buy * executed_sell / limit_sell)
 		// score_native = floor((executed_buy - partial_limit_buy) * native_price_buy / 1e18) if executed_buy > partial_limit_buy
@@ -474,25 +485,32 @@ func computeSolutionScore(
 		limBuy_mul_exSell := api.Mul(tr.BuyAmount, tr.ExecutedSell)
 		limSell_mul_exBuy := api.Mul(tr.SellAmount, tr.ExecutedBuy)
 
-		partialLimitBuy := divCeil(api, rc, limBuy_mul_exSell, tr.SellAmount, AMT_BITS*2+1, AMT_BITS, AMT_BITS+1)
-		partialLimitSell := divFloor(api, rc, limSell_mul_exBuy, tr.BuyAmount, AMT_BITS*2, AMT_BITS, AMT_BITS+1)
+		partialLimitBuy := divCeil(api, rc, limBuy_mul_exSell, safeLimSell, AMT_BITS*2+1, AMT_BITS, AMT_BITS+1)
+		partialLimitSell := divFloor(api, rc, limSell_mul_exBuy, safeLimBuy, AMT_BITS*2, AMT_BITS, AMT_BITS+1)
+
+		sellPos := hintIsLessStrict(api, rc, partialLimitBuy, tr.ExecutedBuy, AMT_BITS+2, ta)  // 1 iff execBuy > partial
+		buyPos := hintIsLessStrict(api, rc, tr.ExecutedSell, partialLimitSell, AMT_BITS+2, ta) // 1 iff partial > execSell
 
 		// Sell: executed_buy > partialLimitBuy
 		// Buy:  partialLimitSell > executed_sell
 		sellCond := api.Mul(ta, api.Sub(1, tr.Side))
 		buyCond := api.Mul(ta, tr.Side)
 
-		_ = assertGeqIfRange(api, rc, tr.ExecutedBuy, api.Add(partialLimitBuy, 1), sellCond, AMT_BITS+2)
-		// partialLimitSell >= executed_sell+1
-		_ = assertGeqIfRange(api, rc, partialLimitSell, api.Add(tr.ExecutedSell, 1), buyCond, AMT_BITS+2)
+		rawSurplusBuySell := api.Sub(tr.ExecutedBuy, partialLimitBuy) // may be 0 or wrap
+		rawSurplusSellBuy := api.Sub(partialLimitSell, tr.ExecutedSell)
 
-		surplusBuySell := api.Sub(tr.ExecutedBuy, partialLimitBuy)   // >0 on sellCond
-		surplusSellBuy := api.Sub(partialLimitSell, tr.ExecutedSell) // >0 on buyCond
+		surplusBuySell := api.Mul(rawSurplusBuySell, api.Mul(sellCond, sellPos)) // only nonzero for active sell trades with execBuy > partial
+		surplusSellBuy := api.Mul(rawSurplusSellBuy, api.Mul(buyCond, buyPos))
 
+		// Buy side conversion: surplusBuyEquiv = floor(surplusSell * limitBuy / limitSell)
+		// When buyPos=0, surplusSellBuy=0 so this is forced to 0 cleanly.
 		surplusSell_mul_limBuy := api.Mul(surplusSellBuy, tr.BuyAmount)
-		surplusBuyEquiv := divFloor(api, rc, surplusSell_mul_limBuy, tr.SellAmount, AMT_BITS*2+1, AMT_BITS, AMT_BITS+1)
+		surplusBuyEquiv := divFloor(api, rc, surplusSell_mul_limBuy, safeLimSell, AMT_BITS*2+1, AMT_BITS, AMT_BITS+1)
 
-		surplusInBuyToken := api.Select(tr.Side, surplusBuyEquiv, surplusBuySell)
+		// ensure surplusBuyEquiv is 0 unless (active buy trade AND buyPos)
+		surplusBuyEquiv = api.Mul(surplusBuyEquiv, api.Mul(buyCond, buyPos))
+
+		surplusInBuyToken := api.Add(surplusBuySell, surplusBuyEquiv)
 
 		surplus_mul_price := api.Mul(surplusInBuyToken, tr.NativePriceBuy)
 		scoreNative := divFloor(api, rc, surplus_mul_price, frontend.Variable(ONE_E18), AMT_BITS*2+PRICE_BITS, 64, AMT_BITS+PRICE_BITS)
@@ -758,37 +776,6 @@ func assertGeqIf(api frontend.API, bc *cmp.BoundedComparator, a, b, cond fronten
 	api.AssertIsEqual(api.Mul(cond, api.Sub(1, ok)), 0)
 }
 
-// Enforces (when cond==1): a >= b over integers by introducing a small non-negative slack d:
-//
-//	a = b + d, with d in [0, 2^dBits)
-//
-// When cond==0: does nothing (d is forced to 0 via Select to keep rangecheck safe).
-// dBits must be large enough to cover the maximum expected difference.
-// For our amounts, AMT_BITS+1 is typically fine (already capped amt comparator at AMT_BITS+1).
-func assertGeqIfRange(
-	api frontend.API,
-	rc frontend.Rangechecker,
-	a, b, cond frontend.Variable,
-	dBits int,
-) (d frontend.Variable) {
-	// d := a - b (field subtraction)
-	d = api.Sub(a, b)
-
-	// Bind meaning under condition: a = b + d
-	// Multiply by cond so it's only enforced when cond==1.
-	api.AssertIsEqual(
-		api.Mul(cond, api.Sub(a, api.Add(b, d))),
-		0,
-	)
-
-	// Enforce d is small non-negative integer under condition via rangecheck.
-	// When cond==0, rangecheck(0) is always ok.
-	dG := api.Select(cond, d, 0)
-	rc.Check(dG, dBits)
-
-	return d
-}
-
 func pow2(bits int) *big.Int {
 	return new(big.Int).Lsh(big.NewInt(1), uint(bits))
 }
@@ -801,7 +788,7 @@ func divCeil(api frontend.API, rc frontend.Rangechecker, a, b frontend.Variable,
 
 func divFloor(api frontend.API, rc frontend.Rangechecker, a, b frontend.Variable, aBits, bBits, qBits int) frontend.Variable {
 	// q,r from hint
-	out, err := api.NewHint(divModHint, 2, a, b)
+	out, err := api.NewHint(DivModHint, 2, a, b)
 	if err != nil {
 		panic(err)
 	}
@@ -833,7 +820,7 @@ func hintIsLessStrict(
 	bits int,
 	cond frontend.Variable,
 ) frontend.Variable {
-	out, err := api.NewHint(isLessHint, 1, a, b)
+	out, err := api.NewHint(IsLessHint, 1, a, b)
 	if err != nil {
 		panic(err)
 	}
@@ -851,7 +838,7 @@ func hintIsLessStrict(
 }
 
 // results[0] = 1 if a < b else 0
-func isLessHint(mod *big.Int, inputs []*big.Int, results []*big.Int) error {
+func IsLessHint(mod *big.Int, inputs []*big.Int, results []*big.Int) error {
 	if len(inputs) != 2 || len(results) != 1 {
 		return nil
 	}
@@ -867,7 +854,7 @@ func isLessHint(mod *big.Int, inputs []*big.Int, results []*big.Int) error {
 
 // results[0] = q = floor(a/b)
 // results[1] = r = a - b*q
-func divModHint(mod *big.Int, inputs []*big.Int, results []*big.Int) error {
+func DivModHint(mod *big.Int, inputs []*big.Int, results []*big.Int) error {
 	if len(inputs) != 2 || len(results) != 2 {
 		return nil
 	}
