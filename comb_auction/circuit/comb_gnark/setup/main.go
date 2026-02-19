@@ -36,8 +36,8 @@ func run() error {
 	fmt.Println("Writing circuit.r1cs...")
 
 	r1cspath := repoPath("../circuit.r1cs")
-	vkPath := "comb_auction.g16.vk"
-	pkPath := "comb_auction.g16.pk"
+	vkPath := repoPath("../comb_auction.g16.vk")
+	pkPath := repoPath("../comb_auction.g16.pk")
 	outDir := repoPath("../contract/src/")
 	outPath := filepath.Join(outDir, "Verifier.sol")
 
