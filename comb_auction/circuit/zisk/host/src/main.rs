@@ -13,14 +13,14 @@ Usage:
 1. Just for building the input.bin for ziskemu execution: cd host && cargo run -- \
   --auction-start 12310225 \
   --auction-end 12311225 \
-  --auction-index 13 \
+  --auction-index 13
 2. Execute using ziskemu: cd guest && ziskemu -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin 
 3. Performance metrics: cd guest && ziskemu -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -X -S -D
 4. Verify constraints: cd guest && LIB_EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
-cargo-zisk verify-constraints -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey
-5. Program setup: cd guest && cargo-zisk rom-setup -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -k $HOME/.zisk/provingKey
+cargo-zisk-cuda verify-constraints -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness_cuda.$LIB_EXT -k $HOME/.zisk/provingKey
+5. Program setup: cd guest && cargo-zisk-cuda rom-setup -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -k $HOME/.zisk/provingKey
 6. Generate proof: cd guest && LIB_EXT=$([[ "$(uname)" == "Darwin" ]] && echo "dylib" || echo "so")
-cargo-zisk prove -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction_program -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness.$LIB_EXT -k $HOME/.zisk/provingKey -o proof
+cargo-zisk-cuda prove -e target/riscv64ima-zisk-zkvm-elf/release/zisk_comb_auction -i build/input.bin -w $HOME/.zisk/bin/libzisk_witness_cuda.$LIB_EXT -k $HOME/.zisk/provingKey -o proof
 
 This is needed only for the first time and only iff the guest code is changed. You can just call the 1 & 6 step directly if the guest code remains same and you have executed all these commands before.
 Commands 2,3 & 4 are just for metrics and statistics and can be skipped, although command 4 is recommened to be called to check if guest and host code are compatible.

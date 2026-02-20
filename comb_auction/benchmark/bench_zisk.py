@@ -10,6 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
+"""
+Usage: 
+uv run bench_zisk.py \
+  --auction-start 12310225 \
+  --auction-end 12311225 \
+  --data-dir ../data/ \
+  --host-dir ../circuit/zisk/host \
+  --guest-dir ../circuit/zisk/guest
+"""
+
 @dataclass
 class AuctionStats:
     auction_index: int
@@ -129,7 +139,7 @@ def run_cmd(cmd: List[str], cwd: Path, env: Optional[Dict[str, str]] = None) -> 
 
 def default_witness_lib() -> Path:
     ext = "dylib" if (os.uname().sysname.lower() == "darwin") else "so"
-    return Path.home() / ".zisk" / "bin" / f"libzisk_witness.{ext}"
+    return Path.home() / ".zisk" / "bin" / f"libzisk_witness_cuda.{ext}"
 
 
 _RE_INT_COMMAS = re.compile(r"(\d[\d,]*)")
@@ -184,7 +194,7 @@ def main() -> None:
     ap.add_argument("--input", type=str, default="build/input.bin")
 
     ap.add_argument("--proving-key", type=str, default=str(Path.home() / ".zisk" / "provingKey"))
-    ap.add_argument("--witness-lib", type=str, default="", help="Optional override. Default: ~/.zisk/bin/libzisk_witness.(so|dylib)")
+    ap.add_argument("--witness-lib", type=str, default="", help="Optional override. Default: ~/.zisk/bin/libzisk_witness_cuda.(so|dylib)")
 
     ap.add_argument("--out-jsonl", type=str, default="zisk_bench_results.jsonl")
     ap.add_argument("--num-cases", type=int, default=5)
@@ -264,7 +274,7 @@ def main() -> None:
             )
 
         prove_cmd = [
-            "cargo-zisk", "prove",
+            "cargo-zisk-cuda", "prove",
             "-e", str(elf_path),
             "-i", str(input_path),
             "-w", str(witness_lib),
