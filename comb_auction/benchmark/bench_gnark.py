@@ -180,6 +180,7 @@ def main():
     ap.add_argument("--auction_index", type=int, default=0)
     ap.add_argument("--skip_prove", action="store_true")
     ap.add_argument("--go_cmd", default="go")
+    ap.add_argument("--icicle", action="store_true")
     args = ap.parse_args()
 
     circuit_path = Path(args.circuit_path).resolve()
@@ -255,9 +256,10 @@ def main():
                 save(results, output_path)
                 continue
 
-            prove_cmd = [
-                args.go_cmd,
-                "run",
+            prove_cmd = [args.go_cmd, "run"]
+            if args.icicle:
+                prove_cmd += ["-tags", "icicle"]
+            prove_cmd += [
                 ".",
                 "--auction_start", str(args.auction_start),
                 "--auction_end",   str(args.auction_end),

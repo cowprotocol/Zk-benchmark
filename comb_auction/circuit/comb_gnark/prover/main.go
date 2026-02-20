@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
 	"os"
@@ -155,13 +154,13 @@ func run(cfg Config) error {
 	if err := readFromFile(cfg.CSPath, cs); err != nil {
 		return fmt.Errorf("read cs: %w", err)
 	}
-	pk := groth16.NewProvingKey(ecc.BN254)
-	if err := readFromFile(cfg.PKPath, pk); err != nil {
+	pk, err := loadProvingKey(cfg.PKPath)
+	if err != nil {
 		return fmt.Errorf("read pk: %w", err)
 	}
 
 	fmt.Printf("Proving (public inputs=%d)\n", len(publicInputs))
-	proof, err := groth16.Prove(cs, pk, fullW)
+	proof, err := proveWithAccel(cs, pk, fullW)
 	if err != nil {
 		return fmt.Errorf("groth16.Prove: %w", err)
 	}
@@ -838,18 +837,6 @@ func frFromKeccakHex(uidHex string) fr.Element {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func readFromFile(path string, r interface {
-	ReadFrom(io.Reader) (int64, error)
-}) error {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = r.ReadFrom(f)
-	return err
 }
 
 func repoPath(rel string) string {
