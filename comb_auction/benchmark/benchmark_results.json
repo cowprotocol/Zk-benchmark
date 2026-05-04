@@ -1,0 +1,162 @@
+[
+  {
+    "params": {
+      "NMax": 120,
+      "TMax": 10,
+      "WMax": 30,
+      "PairMax": 10,
+      "TreeDepth": 7
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 4374060
+    },
+    "prove": {
+      "witness_s": 1243.604125,
+      "prove_s": 9939.036125
+    }
+  },
+  {
+    "params": {
+      "NMax": 200,
+      "TMax": 10,
+      "WMax": 30,
+      "PairMax": 10,
+      "TreeDepth": 8
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 9254460
+    },
+    "prove": {
+      "witness_s": 4735.495834,
+      "prove_s": 21350.891375
+    }
+  },
+  {
+    "params": {
+      "NMax": 300,
+      "TMax": 10,
+      "WMax": 30,
+      "PairMax": 10,
+      "TreeDepth": 9
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 17507376
+    },
+    "prove": {
+      "witness_s": 25009.130834,
+      "prove_s": 55485.429708
+    }
+  },
+  {
+    "params": {
+      "NMax": 400,
+      "TMax": 10,
+      "WMax": 30,
+      "PairMax": 10,
+      "TreeDepth": 9
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 26478497
+    },
+    "prove": {
+      "witness_s": 100862.34275,
+      "prove_s": 66266.217292
+    }
+  },
+  {
+    "params": {
+      "NMax": 120,
+      "TMax": 15,
+      "WMax": 30,
+      "PairMax": 10,
+      "TreeDepth": 7
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 4572901
+    },
+    "prove": {
+      "witness_s": 1063.549292,
+      "prove_s": 8421.240583
+    }
+  },
+  {
+    "params": {
+      "NMax": 120,
+      "TMax": 20,
+      "WMax": 30,
+      "PairMax": 10,
+      "TreeDepth": 7
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 4771742
+    },
+    "prove": {
+      "witness_s": 1067.995,
+      "prove_s": 8333.409791
+    }
+  },
+  {
+    "params": {
+      "NMax": 120,
+      "TMax": 10,
+      "WMax": 30,
+      "PairMax": 15,
+      "TreeDepth": 7
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 6968827
+    },
+    "prove": {
+      "witness_s": 1786.499625,
+      "prove_s": 9381.557584
+    }
+  },
+  {
+    "params": {
+      "NMax": 120,
+      "TMax": 10,
+      "WMax": 30,
+      "PairMax": 20,
+      "TreeDepth": 7
+    },
+    "auction_start": 12310225,
+    "auction_end": 12311225,
+    "auction_index": 13,
+    "auction_id": 12310253,
+    "setup": {
+      "constraints": 10326403
+    },
+    "prove": {
+      "witness_s": 4771.232167,
+      "prove_s": 16909.483459
+    }
+  }
+]

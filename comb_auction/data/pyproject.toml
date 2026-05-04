@@ -1,0 +1,11 @@
+[project]
+name = "comb-auctions-dataset"
+version = "0.1.0"
+description = ""
+requires-python = ">=3.13"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "python-dotenv>=1.0",
+    "matplotlib"
+]

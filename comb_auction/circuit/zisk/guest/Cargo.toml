@@ -1,15 +1,12 @@
 [package]
-name = "guest-zisk"
+name = "zisk_comb_auction"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-guest  = { path = "../guest" }
-common = { path = "../common" }
+auction_caps = { path = "../auction_caps" }
 ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.15.0" }
-k256 = {version = "0.13.4", default-features = false, features = ["schnorr"] }
 tiny-keccak = { version = "=2.0.2", default-features = false, features = ["keccak"] }
 
 [patch.crates-io]
 tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak.git", tag = "patch-2.0.2-zisk-0.15.0" }
-k256 = { git = "https://github.com/0xPolygonHermez/zisk-patch-elliptic-curves.git", tag = "patch-k256-0.13.4-zisk-0.15.0" }
