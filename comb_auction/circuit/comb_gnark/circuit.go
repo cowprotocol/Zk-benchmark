@@ -83,7 +83,8 @@ type Trade struct {
 
 type Solution struct {
 	SolutionID U64
-	Solver     Address
+	// TODO: Ideally should be range-checked to 160 bits
+	Solver Address
 
 	Trades [TMax]Trade
 	// How many trades are actually used (<=TMax). Enforced with selectors.
@@ -181,6 +182,8 @@ func (c *Circuit) Define(api frontend.API) error {
 			alpha := deriveAlpha(api, c.AuctionID, c.Solutions[i].Solver.Value, c.Solutions[i].SolutionID.Value)
 			sc, lhsAlpha := computeSolutionScore(api, cmps, rc, &c.Solutions[i], active, alpha, rPair)
 			totalScores[i] = sc
+			// Enforce total score fits in the Score comparator bound (128 bits).
+			rc.Check(api.Select(active, totalScores[i], 0), 128)
 
 			// bind PairScore[] to trades via RHS alpha identity (no scoring here)
 			enforcePairAggregationRHS(api, cmps, rc, &c.Solutions[i], active, alpha, lhsAlpha)
