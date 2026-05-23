@@ -1,9 +1,10 @@
-Implements zk circuits winner selection for the combinatorial auction in two proving systems: Gnark and Zisk.
+# Combinatorial auction zk circuit implementation
+Implements zk circuits for winner selection of combinatorial auction in two proving systems: Gnark and Zisk.
 
 Both implementations take the same auction data as input, run identical scoring/selection logic, and produce equivalent public outputs, differing only in how the computation is expressed (static R1CS constraints vs. dynamic program execution).
 For context on the motivation and broader architecture, see this [document](https://www.notion.so/cownation/Zk-circuit-for-combinatorial-auctions-winner-selection-2e68da5f04ca8048aa4ef1b830aebe70?source=copy_link)
 
-## What's in this PR
+## What's this does?
 
 ### Mental model
 
